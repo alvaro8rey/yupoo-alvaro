@@ -147,7 +147,19 @@ class YupooPlaywright:
 
         page.on("response", capture_response)
         await page.goto(album["url"], wait_until="domcontentloaded")
-        await human_delay(1, 2)
+        await human_delay(0.5, 1)
+
+        # scroll progresivo para forzar lazy loading de todas las imágenes
+        prev_height = 0
+        while True:
+            await page.evaluate("window.scrollBy(0, 600)")
+            await asyncio.sleep(0.3)
+            height = await page.evaluate("document.body.scrollHeight")
+            scroll_y = await page.evaluate("window.scrollY + window.innerHeight")
+            if scroll_y >= height and height == prev_height:
+                break
+            prev_height = height
+        await asyncio.sleep(1)
 
         # obtener lista de URLs en orden desde el DOM
         if self.covers_only:
