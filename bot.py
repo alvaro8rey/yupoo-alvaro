@@ -36,10 +36,15 @@ from telegram.error import TelegramError
 import db
 
 # ── Configuración ────────────────────────────────────────────────────────────
-BOT_TOKEN     = "YOUR_TOKEN"          # ← pon tu token aquí
+BOT_TOKEN     = "8904389544:AAGzBLce1zDXjtfY0JJ8FDVX8pBQDz0p1XE"
 ADMIN_CHAT_ID = 0                     # ← pon tu chat id aquí
 PAYPAL_USER   = "tu.paypal@email.com" # ← paypal.me/usuario o email
 BOT_USERNAME  = "tu_bot"             # ← username del bot sin @
+
+# ── Precios de personalización ───────────────────────────────────────────────
+PRECIO_BASE           = 18.0   # sin personalización
+PRECIO_NOMBRE_NUMERO  = 21.0   # con nombre y número
+PRECIO_CON_PARCHES    = 22.0   # con nombre, número y parches
 # ─────────────────────────────────────────────────────────────────────────────
 
 logging.basicConfig(
@@ -79,12 +84,11 @@ def limpiar_carrito(chat_id: int):
 # ── Helpers de texto ─────────────────────────────────────────────────────────
 
 def formato_producto(p: dict) -> str:
-    precio_txt = f"{p['precio']:.2f} €" if p["precio"] > 0 else "Precio a consultar"
     tallas = json.loads(p.get("tallas", '["S","M","L","XL","XXL"]'))
     tallas_txt = ", ".join(tallas)
     return (
         f"*{p['nombre']}*\n"
-        f"Precio: *{precio_txt}*\n"
+        f"Precio desde: *{PRECIO_BASE:.0f} €*\n"
         f"Tallas disponibles: {tallas_txt}\n"
         f"ID: `#{p['id']}`"
     )
@@ -270,13 +274,25 @@ async def elegir_talla(update: Update, context: ContextTypes.DEFAULT_TYPE) -> in
     await query.edit_message_reply_markup(reply_markup=None)
     await context.bot.send_message(
         chat_id=chat_id,
-        text=f"Talla seleccionada: *{talla}*\n\n¿Quieres personalización? (nombre/número en el dorsal)",
+        text=(
+            f"Talla seleccionada: *{talla}*\n\n"
+            f"¿Quieres personalización?"
+        ),
         parse_mode=ParseMode.MARKDOWN,
         reply_markup=InlineKeyboardMarkup([
-            [
-                InlineKeyboardButton("✏️ Sí", callback_data="pers_si"),
-                InlineKeyboardButton("No", callback_data="pers_no"),
-            ]
+            [InlineKeyboardButton(
+                f"Sin personalización ({PRECIO_BASE:.0f}€)",
+                callback_data="pers_sin"
+            )],
+            [InlineKeyboardButton(
+                f"Con nombre y número (+3€, total {PRECIO_NOMBRE_NUMERO:.0f}€)",
+                callback_data="pers_nombre_numero"
+            )],
+            [InlineKeyboardButton(
+                f"Con nombre, número y parches (+4€, total {PRECIO_CON_PARCHES:.0f}€)",
+                callback_data="pers_con_parches"
+            )],
+            [InlineKeyboardButton("❌ Cancelar", callback_data="cancelar_pedido")],
         ]),
     )
     return ESPERANDO_PERSONALIZACION
@@ -293,8 +309,18 @@ async def elegir_personalizacion(update: Update, context: ContextTypes.DEFAULT_T
 
     await query.edit_message_reply_markup(reply_markup=None)
 
-    if query.data == "pers_si":
+    if query.data == "pers_sin":
+        carrito["personalizado_actual"] = False
+        carrito["tipo_personalizacion_actual"] = "sin_personalizacion"
+        carrito["nombre_dorsal_actual"] = ""
+        carrito["numero_dorsal_actual"] = ""
+        return await _agregar_item_al_carrito(update, context)
+    elif query.data in ("pers_nombre_numero", "pers_con_parches"):
         carrito["personalizado_actual"] = True
+        if query.data == "pers_nombre_numero":
+            carrito["tipo_personalizacion_actual"] = "nombre_numero"
+        else:
+            carrito["tipo_personalizacion_actual"] = "nombre_numero_parches"
         await context.bot.send_message(
             chat_id=chat_id,
             text="✏️ Escribe el *nombre* que quieres en el dorsal:",
@@ -302,7 +328,9 @@ async def elegir_personalizacion(update: Update, context: ContextTypes.DEFAULT_T
         )
         return ESPERANDO_NOMBRE_DORSAL
     else:
+        # fallback
         carrito["personalizado_actual"] = False
+        carrito["tipo_personalizacion_actual"] = "sin_personalizacion"
         carrito["nombre_dorsal_actual"] = ""
         carrito["numero_dorsal_actual"] = ""
         return await _agregar_item_al_carrito(update, context)
@@ -336,21 +364,30 @@ async def _agregar_item_al_carrito(
     carrito = get_carrito(chat_id)
     producto = carrito["producto_actual"]
 
+    tipo_pers = carrito.get("tipo_personalizacion_actual", "sin_personalizacion")
+    if tipo_pers == "nombre_numero":
+        precio_unitario = PRECIO_NOMBRE_NUMERO
+    elif tipo_pers == "nombre_numero_parches":
+        precio_unitario = PRECIO_CON_PARCHES
+    else:
+        precio_unitario = PRECIO_BASE
+
     item = {
         "producto_id": producto["id"],
         "nombre_producto": producto["nombre"],
         "talla": carrito.get("talla_actual", ""),
         "personalizado": carrito.get("personalizado_actual", False),
+        "tipo_personalizacion": tipo_pers,
         "nombre_dorsal": carrito.get("nombre_dorsal_actual", ""),
         "numero_dorsal": carrito.get("numero_dorsal_actual", ""),
         "cantidad": 1,
-        "precio_unitario": producto["precio"],
+        "precio_unitario": precio_unitario,
     }
     carrito["items"].append(item)
 
     # Limpiar datos temporales del item
     for k in ("producto_actual", "talla_actual", "personalizado_actual",
-               "nombre_dorsal_actual", "numero_dorsal_actual"):
+               "tipo_personalizacion_actual", "nombre_dorsal_actual", "numero_dorsal_actual"):
         carrito.pop(k, None)
 
     resumen = formato_resumen_carrito(carrito["items"])
