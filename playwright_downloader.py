@@ -162,6 +162,24 @@ class YupooPlaywright:
             await human_delay()
         return albums
 
+    async def _fetch_image(self, page: Page, url: str) -> bytes | None:
+        """Navega a la URL de imagen con el browser y captura los bytes."""
+        result = {}
+        async def on_resp(response):
+            if response.url == url and not result:
+                try:
+                    result["body"] = await response.body()
+                except Exception:
+                    pass
+        page.on("response", on_resp)
+        try:
+            await page.goto(url, wait_until="domcontentloaded", timeout=15000)
+        except Exception:
+            pass
+        await asyncio.sleep(0.3)
+        page.remove_listener("response", on_resp)
+        return result.get("body")
+
     async def _fetch_via_browser(self, page: Page, url: str) -> bytes | None:
         """Descarga una URL de imagen navegando a ella con el browser real."""
         captured = {}
@@ -299,22 +317,15 @@ class YupooPlaywright:
             if path.exists():
                 saved += 1
                 continue
-            # fetch desde dentro del navegador para pasar el WAF
-            body = await page.evaluate("""async (url) => {
-                try {
-                    const r = await fetch(url, {credentials: 'include'});
-                    if (!r.ok) return null;
-                    const buf = await r.arrayBuffer();
-                    return Array.from(new Uint8Array(buf));
-                } catch(e) { return null; }
-            }""", url)
+            # navegar directamente a la URL de la imagen — el navegador la carga sin WAF
+            body = await self._fetch_image(page, url)
             if body:
-                await self.save_image(bytes(body), path)
+                await self.save_image(body, path)
                 log.info(f"    [{i}/{len(img_urls)}] {path.name}")
                 saved += 1
             else:
-                log.warning(f"    [{i}/{len(img_urls)}] fetch fallido: {url}")
-            await asyncio.sleep(0.3)
+                log.warning(f"    [{i}/{len(img_urls)}] fallido: {url}")
+            await asyncio.sleep(0.2)
 
         if saved == 0:
             try:
