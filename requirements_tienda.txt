@@ -2,3 +2,4 @@ python-telegram-bot==21.3
 aiofiles
 Pillow
 flask
+psycopg2-binary
