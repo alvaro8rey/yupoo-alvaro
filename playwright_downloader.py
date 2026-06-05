@@ -1,0 +1,312 @@
+"""
+Yupoo Downloader con Playwright — evita bloqueos WAF usando navegador real.
+
+Instalación:
+    pip install playwright httpx aiofiles Pillow deep-translator
+    playwright install chromium
+
+Uso interactivo:
+    python playwright_downloader.py
+
+Uso directo:
+    python playwright_downloader.py https://nombre.x.yupoo.com
+    python playwright_downloader.py https://nombre.x.yupoo.com --solo-portadas
+    python playwright_downloader.py https://nombre.x.yupoo.com --urls https://.../albums/123
+"""
+
+import asyncio
+import random
+import re
+import argparse
+import logging
+from pathlib import Path
+from io import BytesIO
+
+import httpx
+import aiofiles
+from PIL import Image, ImageFile
+from playwright.async_api import async_playwright, Page
+from deep_translator import GoogleTranslator
+
+ImageFile.LOAD_TRUNCATED_IMAGES = True
+logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
+log = logging.getLogger("yupoo")
+
+
+# ------------------------------------------------------------------ helpers
+
+def sanitize(name: str) -> str:
+    name = re.sub(r'[\\/:*?"<>|]', "_", name)
+    return name.strip("_ ")[:120] or "sin_titulo"
+
+
+def translate(text: str) -> str:
+    try:
+        result = GoogleTranslator(source="auto", target="es").translate(text)
+        return result if result else text
+    except Exception:
+        return text
+
+
+async def human_delay(min_s=0.8, max_s=2.5):
+    await asyncio.sleep(random.uniform(min_s, max_s))
+
+
+# ------------------------------------------------------------------ scraper
+
+class YupooPlaywright:
+    def __init__(self, base_url: str, output: Path, covers_only=False, no_translate=False, headless=True):
+        self.base_url = base_url.rstrip("/")
+        self.output = output
+        self.covers_only = covers_only
+        self.translate = not no_translate
+        self.headless = headless
+        self.catalog_name = self._extract_catalog_name(base_url)
+
+    def _extract_catalog_name(self, url: str) -> str:
+        m = re.search(r'https?://([^.]+)\.x\.yupoo\.com', url)
+        if m:
+            return m.group(1)
+        m = re.search(r'https?://([^.]+)\.yupoo\.com', url)
+        return m.group(1) if m else "catalogo"
+
+    # -------------------------------------------------------- page navigation
+
+    async def get_page_count(self, page: Page, url: str) -> int:
+        await page.goto(url, wait_until="domcontentloaded")
+        await human_delay()
+        inp = await page.query_selector('form.pagination__jumpwrap input[name="page"]')
+        if inp:
+            return int(await inp.get_attribute("max") or "1")
+        return 1
+
+    async def scrape_albums_from_page(self, page: Page, url: str) -> list[dict]:
+        await page.goto(url, wait_until="domcontentloaded")
+        await human_delay()
+        anchors = await page.query_selector_all("a.album__main")
+        albums = []
+        for a in anchors:
+            href = await a.get_attribute("href") or ""
+            title = await a.get_attribute("title") or await a.inner_text() or "sin_titulo"
+            title = title.strip()
+            if href.startswith("http"):
+                album_url = href
+            else:
+                album_url = f"https://{self.catalog_name}.x.yupoo.com{href}"
+            album_url = re.sub(r'\?.*$', '', album_url) + "?uid=1"
+            albums.append({"title": title, "url": album_url})
+        return albums
+
+    async def get_all_albums(self, page: Page) -> list[dict]:
+        first = f"{self.base_url}/albums?tab=gallery&page=1"
+        total = await self.get_page_count(page, first)
+        log.info(f"Páginas del catálogo: {total}")
+        albums = []
+        for p in range(1, total + 1):
+            url = f"{self.base_url}/albums?tab=gallery&page={p}"
+            page_albums = await self.scrape_albums_from_page(page, url)
+            albums.extend(page_albums)
+            log.info(f"  Página {p}/{total}: {len(page_albums)} álbums")
+            await human_delay()
+        log.info(f"Total álbums encontrados: {len(albums)}")
+        return albums
+
+    async def get_albums_from_category(self, page: Page, cat_url: str) -> list[dict]:
+        base = re.sub(r'\?.*$', '', cat_url.rstrip("/"))
+        total = await self.get_page_count(page, f"{base}?page=1")
+        albums = []
+        for p in range(1, total + 1):
+            page_albums = await self.scrape_albums_from_page(page, f"{base}?page={p}")
+            albums.extend(page_albums)
+            await human_delay()
+        return albums
+
+    async def get_image_urls(self, page: Page, album_url: str) -> list[str]:
+        await page.goto(album_url, wait_until="domcontentloaded")
+        await human_delay()
+        imgs = []
+
+        if self.covers_only:
+            cover = await page.query_selector(".showalbumheader__gallerycover img")
+            if cover:
+                src = await cover.get_attribute("src") or ""
+                if src:
+                    imgs.append("https:" + src if src.startswith("//") else src)
+            return imgs
+
+        divs = await page.query_selector_all("div.showalbum__children")
+        for div in divs:
+            wrap = await div.query_selector(".image__imagewrap")
+            if wrap and await wrap.get_attribute("data-type") == "video":
+                continue
+            img = await div.query_selector("img")
+            if not img:
+                continue
+            src = await img.get_attribute("data-origin-src") or await img.get_attribute("src") or ""
+            if src:
+                imgs.append("https:" + src if src.startswith("//") else src)
+        return imgs
+
+    # -------------------------------------------------------- download
+
+    async def save_image(self, img_bytes: bytes, path: Path):
+        path.parent.mkdir(parents=True, exist_ok=True)
+        try:
+            img = Image.open(BytesIO(img_bytes)).convert("RGB")
+            buf = BytesIO()
+            img.save(buf, format="JPEG", quality=95)
+            async with aiofiles.open(path, "wb") as f:
+                await f.write(buf.getvalue())
+        except Exception as e:
+            log.warning(f"Error procesando imagen {path.name}: {e} — guardando raw")
+            async with aiofiles.open(path, "wb") as f:
+                await f.write(img_bytes)
+
+    async def download_image(self, client: httpx.AsyncClient, url: str, path: Path, n: int, total: int):
+        if path.exists():
+            return
+        for attempt in range(4):
+            try:
+                r = await client.get(url, timeout=30)
+                if r.status_code == 200:
+                    await self.save_image(r.content, path)
+                    log.info(f"    [{n}/{total}] {path.name}")
+                    return
+                log.warning(f"    [{n}/{total}] HTTP {r.status_code} -> {url}")
+            except Exception as e:
+                log.warning(f"    [{n}/{total}] intento {attempt+1} fallido: {e}")
+            await asyncio.sleep(2 ** attempt)
+        log.error(f"    [{n}/{total}] no se pudo descargar: {url}")
+
+    async def download_album(self, page: Page, client: httpx.AsyncClient, album: dict):
+        title_raw = album["title"]
+        title_es = translate(title_raw) if self.translate else title_raw
+        folder = sanitize(title_es)
+        album_dir = self.output / self.catalog_name / folder
+
+        if album_dir.exists() and any(album_dir.iterdir()):
+            log.info(f"  [skip] {folder}")
+            return
+
+        log.info(f"  Álbum: {title_raw!r} -> {folder!r}")
+        img_urls = await self.get_image_urls(page, album["url"])
+        if not img_urls:
+            log.warning(f"  Sin imágenes en: {title_raw!r}")
+            return
+
+        log.info(f"  {len(img_urls)} imágenes")
+        for i, url in enumerate(img_urls, 1):
+            filename = re.findall(r'/([^/?]+)', url)[-1]
+            path = album_dir / f"{Path(filename).stem}.jpg"
+            await self.download_image(client, url, path, i, len(img_urls))
+            await asyncio.sleep(random.uniform(0.3, 0.8))
+
+    # -------------------------------------------------------- run
+
+    async def run(self, specific_urls: list[str] = None):
+        async with async_playwright() as pw:
+            browser = await pw.chromium.launch(headless=self.headless)
+            context = await browser.new_context(
+                user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
+                           "(KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+                viewport={"width": 1280, "height": 800},
+            )
+            page = await context.new_page()
+
+            if specific_urls:
+                albums = []
+                for url in specific_urls:
+                    if re.search(r'/(categories|collections)/', url):
+                        albums.extend(await self.get_albums_from_category(page, url))
+                    elif re.search(r'/albums/\d+', url):
+                        await page.goto(url, wait_until="domcontentloaded")
+                        await human_delay()
+                        t = await page.query_selector("span.showalbumheader__gallerytitle")
+                        title = (await t.inner_text()).strip() if t else "album"
+                        clean = re.sub(r'\?.*$', '', url) + "?uid=1"
+                        albums.append({"title": title, "url": clean})
+                    else:
+                        log.warning(f"URL no reconocida: {url}")
+            else:
+                albums = await self.get_all_albums(page)
+
+            if not albums:
+                log.error("No se encontraron álbums.")
+                await browser.close()
+                return
+
+            async with httpx.AsyncClient(headers={
+                "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
+                              "(KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+                "Referer": "https://yupoo.com/",
+            }) as client:
+                for i, album in enumerate(albums, 1):
+                    log.info(f"[{i}/{len(albums)}]")
+                    await self.download_album(page, client, album)
+                    await human_delay(1, 3)
+
+            await browser.close()
+        log.info(f"Hecho. Imágenes en: {self.output / self.catalog_name}")
+
+
+# ------------------------------------------------------------------ CLI
+
+def menu_interactivo():
+    print("\n===== YUPOO DOWNLOADER (Playwright) =====")
+    base_url = input("URL del catálogo (ej: https://nombre.x.yupoo.com): ").strip()
+    print()
+    print("¿Qué quieres descargar?")
+    print("  1. Toda la colección — todas las fotos")
+    print("  2. Toda la colección — solo portadas")
+    print("  3. Álbums o categorías concretas — todas las fotos")
+    print("  4. Álbums o categorías concretas — solo portadas")
+    opcion = input("Opción (1-4): ").strip()
+
+    specific_urls = None
+    covers_only = opcion in ("2", "4")
+
+    if opcion in ("3", "4"):
+        print("Pega las URLs una por una. Escribe 'ok' cuando termines:")
+        specific_urls = []
+        while True:
+            u = input("  URL: ").strip()
+            if u.lower() == "ok":
+                break
+            if u:
+                specific_urls.append(u)
+
+    carpeta = input("\nCarpeta de destino [./fotos_yupoo]: ").strip() or "./fotos_yupoo"
+    sin_trad = input("¿Desactivar traducción al español? (s/N): ").strip().lower() == "s"
+    visible = input("¿Mostrar navegador? (s/N): ").strip().lower() == "s"
+
+    return base_url, specific_urls, covers_only, sin_trad, carpeta, not visible
+
+
+def main():
+    parser = argparse.ArgumentParser()
+    parser.add_argument("url", nargs="?")
+    parser.add_argument("--urls", nargs="+")
+    parser.add_argument("--carpeta", default="./fotos_yupoo")
+    parser.add_argument("--solo-portadas", action="store_true")
+    parser.add_argument("--sin-traduccion", action="store_true")
+    parser.add_argument("--visible", action="store_true", help="Mostrar navegador (no headless)")
+    args = parser.parse_args()
+
+    if args.url:
+        base_url, specific_urls, covers_only = args.url, args.urls or None, args.solo_portadas
+        no_translate, carpeta, headless = args.sin_traduccion, args.carpeta, not args.visible
+    else:
+        base_url, specific_urls, covers_only, no_translate, carpeta, headless = menu_interactivo()
+
+    dl = YupooPlaywright(
+        base_url=base_url,
+        output=Path(carpeta),
+        covers_only=covers_only,
+        no_translate=no_translate,
+        headless=headless,
+    )
+    asyncio.run(dl.run(specific_urls=specific_urls))
+
+
+if __name__ == "__main__":
+    main()
