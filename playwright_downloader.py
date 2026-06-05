@@ -301,25 +301,21 @@ class YupooPlaywright:
         await asyncio.sleep(1)
         page.remove_listener("response", capture_response)
 
-        if not ordered_urls:
-            log.warning(f"  Sin imágenes: {title_raw!r}")
+        if not captured:
+            log.warning(f"  Sin imágenes capturadas: {title_raw!r}")
             return
 
-        log.info(f"  {len(ordered_urls)} imágenes")
+        log.info(f"  {len(captured)} imágenes capturadas")
         saved = 0
-        for i, url in enumerate(ordered_urls, 1):
+        for i, (url, body) in enumerate(captured.items(), 1):
             filename = re.findall(r'/([^/?]+)', url)[-1]
             path = album_dir / f"{Path(filename).stem}.jpg"
             if path.exists():
                 saved += 1
                 continue
-            body = captured.get(url)
-            if body:
-                await self.save_image(body, path)
-                log.info(f"    [{i}/{len(ordered_urls)}] {path.name}")
-                saved += 1
-            else:
-                log.warning(f"    [{i}/{len(ordered_urls)}] no capturada: {url}")
+            await self.save_image(body, path)
+            log.info(f"    [{i}/{len(captured)}] {path.name}")
+            saved += 1
 
         if saved == 0:
             # si no se capturó nada elimina la carpeta vacía
