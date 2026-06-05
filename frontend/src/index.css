@@ -578,7 +578,7 @@ img {
   background: var(--white);
   border-radius: 18px;
   width: 100%;
-  max-width: 860px;
+  max-width: 1060px;
   max-height: calc(100vh - 2rem);
   overflow: hidden;
   display: flex;
@@ -632,17 +632,47 @@ img {
 }
 
 .gallery-main-img {
-  aspect-ratio: 1;
+  aspect-ratio: 3/4;
   border-radius: var(--radius);
   overflow: hidden;
-  background: var(--gray-200);
+  background: var(--gray-100);
   position: relative;
+  cursor: zoom-in;
+}
+.gallery-main-img.zoomed {
+  cursor: zoom-out;
+}
+.gallery-main-img.zoomed img {
+  object-fit: contain;
+  background: var(--gray-100);
 }
 .gallery-main-img img {
   width: 100%;
   height: 100%;
-  object-fit: cover;
+  object-fit: contain;
   transition: opacity .2s;
+}
+.gallery-zoom-hint {
+  position: absolute;
+  bottom: 10px;
+  right: 10px;
+  background: rgba(0,0,0,.45);
+  border-radius: 8px;
+  padding: .3rem .4rem;
+  color: #fff;
+  display: flex;
+  align-items: center;
+  pointer-events: none;
+}
+.gallery-zoom-hint svg {
+  width: 16px;
+  height: 16px;
+}
+.gallery-count {
+  text-align: center;
+  font-size: .75rem;
+  color: var(--text-muted);
+  margin-top: -.25rem;
 }
 .gallery-no-img {
   width: 100%;
@@ -691,10 +721,10 @@ img {
 
 /* Info side */
 .modal-info {
-  padding: 1.75rem 1.75rem 1.75rem 1.5rem;
+  padding: 2rem 2rem 2rem 1.75rem;
   display: flex;
   flex-direction: column;
-  gap: 1.1rem;
+  gap: 1.25rem;
   overflow-y: auto;
 }
 
@@ -707,11 +737,11 @@ img {
 }
 
 .modal-name {
-  font-size: 1.3rem;
+  font-size: 1.5rem;
   font-weight: 800;
   color: var(--navy);
   line-height: 1.3;
-  margin-top: -.4rem;
+  margin-top: .2rem;
 }
 
 .modal-tags {
@@ -831,6 +861,106 @@ img {
   flex-shrink: 0;
 }
 
+/* ── Price hero ───────────────────────────────────────────────────────────── */
+.price-hero {
+  display: flex;
+  flex-direction: column;
+  gap: .15rem;
+}
+.price-hero-value {
+  font-size: 2rem;
+  font-weight: 900;
+  color: var(--blue-dark);
+  letter-spacing: -.03em;
+}
+.price-hero-note {
+  font-size: .78rem;
+  color: var(--text-muted);
+}
+
+/* ── Price row sub ────────────────────────────────────────────────────────── */
+.price-row-sub {
+  font-size: .72rem;
+  color: var(--text-muted);
+  margin-top: .1rem;
+}
+
+/* ── Tallas ───────────────────────────────────────────────────────────────── */
+.tallas-grid {
+  display: flex;
+  flex-wrap: wrap;
+  gap: .4rem;
+  margin-top: .4rem;
+}
+.talla-chip {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 44px;
+  padding: .35rem .6rem;
+  border-radius: 8px;
+  border: 1.5px solid var(--border);
+  font-size: .8rem;
+  font-weight: 700;
+  color: var(--text);
+  background: var(--white);
+}
+
+/* ── Info cards ───────────────────────────────────────────────────────────── */
+.info-cards {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: .6rem;
+}
+.info-card {
+  display: flex;
+  align-items: flex-start;
+  gap: .6rem;
+  background: var(--gray-50);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  padding: .65rem .75rem;
+}
+.info-card-icon {
+  font-size: 1.2rem;
+  flex-shrink: 0;
+  line-height: 1;
+  margin-top: .05rem;
+}
+.info-card-title {
+  font-size: .8rem;
+  font-weight: 700;
+  color: var(--text);
+}
+.info-card-text {
+  font-size: .72rem;
+  color: var(--text-muted);
+  margin-top: .1rem;
+}
+
+/* ── Yupoo link ───────────────────────────────────────────────────────────── */
+.yupoo-link {
+  display: inline-flex;
+  align-items: center;
+  gap: .4rem;
+  font-size: .8rem;
+  font-weight: 600;
+  color: var(--text-muted);
+  text-decoration: none;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: .5rem .85rem;
+  transition: color .15s, border-color .15s;
+}
+.yupoo-link:hover {
+  color: var(--blue-dark);
+  border-color: var(--blue-border);
+}
+.yupoo-link svg {
+  width: 14px;
+  height: 14px;
+}
+
 /* ── Mobile ───────────────────────────────────────────────────────────────── */
 @media (max-width: 1100px) {
   .product-grid {
@@ -851,11 +981,16 @@ img {
     padding: 1.25rem;
   }
   .gallery-main-img {
-    max-height: 280px;
+    aspect-ratio: 4/3;
+    max-height: 320px;
   }
 
   .modal-info {
     padding: 1.25rem;
+  }
+
+  .info-cards {
+    grid-template-columns: 1fr 1fr;
   }
 }
 
