@@ -104,7 +104,9 @@ def formato_resumen_carrito(items: list[dict]) -> str:
         total += precio_item
         pers = ""
         if item.get("personalizado"):
-            pers = f" | Dorsal: {item.get('nombre_dorsal','')} #{item.get('numero_dorsal','')}"
+            tipo = item.get("tipo_personalizacion", "")
+            parches_txt = " + parches" if tipo == "nombre_numero_parches" else ""
+            pers = f" | Dorsal: {item.get('nombre_dorsal','')} #{item.get('numero_dorsal','')}{parches_txt}"
         lineas.append(
             f"{i}. *{item['nombre_producto']}* — Talla {item['talla']}"
             f"{pers} × {item['cantidad']} = {precio_item:.2f} €"
@@ -530,6 +532,7 @@ async def recibir_referencia_paypal(
                 producto_id=item["producto_id"],
                 talla=item["talla"],
                 personalizado=item["personalizado"],
+                tipo_personalizacion=item.get("tipo_personalizacion", "sin_personalizacion"),
                 nombre_dorsal=item.get("nombre_dorsal", ""),
                 numero_dorsal=item.get("numero_dorsal", ""),
                 cantidad=item["cantidad"],
@@ -876,7 +879,10 @@ def main():
                 CallbackQueryHandler(elegir_talla, pattern="^(talla_|cancelar_pedido)"),
             ],
             ESPERANDO_PERSONALIZACION: [
-                CallbackQueryHandler(elegir_personalizacion, pattern="^(pers_si|pers_no)$"),
+                CallbackQueryHandler(
+                    elegir_personalizacion,
+                    pattern="^(pers_sin|pers_nombre_numero|pers_con_parches|cancelar_pedido)$"
+                ),
             ],
             ESPERANDO_NOMBRE_DORSAL: [
                 MessageHandler(filters.TEXT & ~filters.COMMAND, recibir_nombre_dorsal),
