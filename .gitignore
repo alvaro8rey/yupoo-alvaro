@@ -10,3 +10,4 @@ web/
 frontend/node_modules/
 frontend/dist/
 !frontend/package.json
+frontend/package-lock.json

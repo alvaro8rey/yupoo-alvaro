@@ -1,0 +1,104 @@
+[
+  {
+    "id": 6,
+    "nombre": "Camiseta Argentina 2026 Local",
+    "precio": 18.0,
+    "foto_path": "",
+    "yupoo_url": "https://baike5555.x.yupoo.com/albums/128",
+    "tallas": [
+      "S",
+      "M",
+      "L",
+      "XL",
+      "XXL"
+    ],
+    "liga": "Selecciones",
+    "equipo": "Argentina",
+    "fotos": []
+  },
+  {
+    "id": 2,
+    "nombre": "Camiseta Barcelona 25/26 Local",
+    "precio": 18.0,
+    "foto_path": "",
+    "yupoo_url": "https://baike5555.x.yupoo.com/albums/124",
+    "tallas": [
+      "S",
+      "M",
+      "L",
+      "XL",
+      "XXL"
+    ],
+    "liga": "La Liga",
+    "equipo": "FC Barcelona",
+    "fotos": []
+  },
+  {
+    "id": 5,
+    "nombre": "Camiseta Brasil 2026 Local",
+    "precio": 18.0,
+    "foto_path": "",
+    "yupoo_url": "https://baike5555.x.yupoo.com/albums/127",
+    "tallas": [
+      "S",
+      "M",
+      "L",
+      "XL",
+      "XXL"
+    ],
+    "liga": "Selecciones",
+    "equipo": "Brasil",
+    "fotos": []
+  },
+  {
+    "id": 3,
+    "nombre": "Camiseta Manchester City 25/26 Local",
+    "precio": 18.0,
+    "foto_path": "",
+    "yupoo_url": "https://baike5555.x.yupoo.com/albums/125",
+    "tallas": [
+      "S",
+      "M",
+      "L",
+      "XL",
+      "XXL"
+    ],
+    "liga": "Premier League",
+    "equipo": "Manchester City",
+    "fotos": []
+  },
+  {
+    "id": 4,
+    "nombre": "Camiseta PSG 25/26 Local",
+    "precio": 18.0,
+    "foto_path": "",
+    "yupoo_url": "https://baike5555.x.yupoo.com/albums/126",
+    "tallas": [
+      "S",
+      "M",
+      "L",
+      "XL",
+      "XXL"
+    ],
+    "liga": "Ligue 1",
+    "equipo": "PSG",
+    "fotos": []
+  },
+  {
+    "id": 1,
+    "nombre": "Camiseta Real Madrid 25/26 Local",
+    "precio": 18.0,
+    "foto_path": "",
+    "yupoo_url": "https://baike5555.x.yupoo.com/albums/123",
+    "tallas": [
+      "S",
+      "M",
+      "L",
+      "XL",
+      "XXL"
+    ],
+    "liga": "La Liga",
+    "equipo": "Real Madrid",
+    "fotos": []
+  }
+]
