@@ -34,12 +34,13 @@ from telegram.constants import ParseMode
 from telegram.error import TelegramError
 
 import db
+import os
 
-# ── Configuración ────────────────────────────────────────────────────────────
-BOT_TOKEN     = "8904389544:AAGzBLce1zDXjtfY0JJ8FDVX8pBQDz0p1XE"
-ADMIN_CHAT_ID = 0                     # ← pon tu chat id aquí
-PAYPAL_USER   = "tu.paypal@email.com" # ← paypal.me/usuario o email
-BOT_USERNAME  = "tu_bot"             # ← username del bot sin @
+# ── Configuración (variables de entorno o valores por defecto) ───────────────
+BOT_TOKEN     = os.environ.get("BOT_TOKEN", "8904389544:AAGzBLce1zDXjtfY0JJ8FDVX8pBQDz0p1XE")
+ADMIN_CHAT_ID = int(os.environ.get("ADMIN_CHAT_ID", "0"))
+PAYPAL_USER   = os.environ.get("PAYPAL_USER", "tu.paypal@email.com")
+BOT_USERNAME  = os.environ.get("BOT_USERNAME", "tu_bot")
 
 # ── Precios de personalización ───────────────────────────────────────────────
 PRECIO_BASE           = 18.0   # sin personalización
