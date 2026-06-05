@@ -184,19 +184,24 @@ class YupooPlaywright:
 
         # modo solo portadas: nunca entrar al álbum
         if self.covers_only:
-            path = album_dir / "portada.jpg"
+            folder_name = sanitize(title_es)
+            path = album_dir / f"{folder_name}.jpg"
+            img_bytes = None
             if album.get("cover"):
-                # ya capturada del listado
-                await self.save_image(album["cover"], path)
+                img_bytes = album["cover"]
             elif album.get("cover_url"):
-                # navegar directamente a la URL de la imagen con el navegador
                 img_bytes = await self._fetch_via_browser(page, album["cover_url"])
-                if img_bytes:
-                    await self.save_image(img_bytes, path)
-                else:
-                    log.warning(f"  No se pudo obtener portada: {title_raw!r}")
+
+            if img_bytes:
+                await self.save_image(img_bytes, path)
+                size_kb = len(img_bytes) // 1024
+                log.info(f"    guardada: {path.name} ({size_kb}KB)")
+            else:
+                log.warning(f"    sin imagen: {title_raw!r}")
+                try:
                     album_dir.rmdir()
-            log.info(f"    portada: {path.name}")
+                except Exception:
+                    pass
             return
 
         captured: dict[str, bytes] = {}
