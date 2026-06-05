@@ -7,3 +7,5 @@ info.log
 tienda.db
 web/
 
+frontend/node_modules/
+frontend/dist/

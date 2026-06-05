@@ -30,9 +30,18 @@ def init_db():
                 foto_path   TEXT    NOT NULL DEFAULT '',
                 yupoo_url   TEXT    NOT NULL DEFAULT '',
                 tallas      TEXT    NOT NULL DEFAULT '["S","M","L","XL","XXL"]',
-                activo      INTEGER NOT NULL DEFAULT 1
+                activo      INTEGER NOT NULL DEFAULT 1,
+                liga        TEXT    NOT NULL DEFAULT '',
+                equipo      TEXT    NOT NULL DEFAULT ''
             )
         """)
+
+        # Safe migrations: add liga and equipo columns if they don't exist yet
+        existing_cols = {row[1] for row in c.execute("PRAGMA table_info(productos)").fetchall()}
+        if "liga" not in existing_cols:
+            c.execute("ALTER TABLE productos ADD COLUMN liga TEXT NOT NULL DEFAULT ''")
+        if "equipo" not in existing_cols:
+            c.execute("ALTER TABLE productos ADD COLUMN equipo TEXT NOT NULL DEFAULT ''")
 
         c.execute("""
             CREATE TABLE IF NOT EXISTS pedidos (
@@ -86,11 +95,15 @@ def get_todos_productos(solo_activos: bool = True) -> list[dict]:
     with get_connection() as conn:
         if solo_activos:
             rows = conn.execute(
-                "SELECT * FROM productos WHERE activo = 1 ORDER BY nombre"
+                "SELECT id, nombre, precio, foto_path, yupoo_url, tallas, activo, "
+                "COALESCE(liga,'') AS liga, COALESCE(equipo,'') AS equipo "
+                "FROM productos WHERE activo = 1 ORDER BY nombre"
             ).fetchall()
         else:
             rows = conn.execute(
-                "SELECT * FROM productos ORDER BY nombre"
+                "SELECT id, nombre, precio, foto_path, yupoo_url, tallas, activo, "
+                "COALESCE(liga,'') AS liga, COALESCE(equipo,'') AS equipo "
+                "FROM productos ORDER BY nombre"
             ).fetchall()
     return [dict(r) for r in rows]
 

@@ -22,9 +22,11 @@ PRECIO_NOMBRE_NUMERO  = 21
 PRECIO_CON_PARCHES    = 22
 # ─────────────────────────────────────────────────────────────────────────────
 
-ROOT      = Path(__file__).parent
-WEB_DIR   = ROOT / "web"
-FOTOS_DIR = WEB_DIR / "fotos"
+ROOT           = Path(__file__).parent
+WEB_DIR        = ROOT / "web"
+FOTOS_DIR      = WEB_DIR / "fotos"
+FRONTEND_PUBLIC = ROOT / "frontend" / "public"
+FRONTEND_FOTOS  = FRONTEND_PUBLIC / "fotos"
 
 PLACEHOLDER = "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='400' height='400'%3E%3Crect width='400' height='400' fill='%23e2e8f0'/%3E%3Ctext x='50%25' y='50%25' dominant-baseline='middle' text-anchor='middle' font-family='sans-serif' font-size='16' fill='%2394a3b8'%3ESin imagen%3C/text%3E%3C/svg%3E"
 
@@ -264,32 +266,87 @@ def generar_index(productos: list[dict], fotos_map: dict) -> str:
 </html>"""
 
 
-# ── main ──────────────────────────────────────────────────────────────────────
+# ── exportar data.json para la SPA React ─────────────────────────────────────
 
-def generar():
+def copiar_fotos_frontend(producto: dict) -> list[str]:
+    """Copia imágenes del producto a frontend/public/fotos/ y devuelve rutas relativas."""
+    prod_id   = producto["id"]
+    foto_path = producto.get("foto_path", "")
+    rutas = []
+
+    if foto_path:
+        cover = Path(foto_path)
+        if cover.exists():
+            carpeta  = cover.parent
+            imagenes = sorted(set(sorted(carpeta.glob("*.jp*g")) + sorted(carpeta.glob("*.png"))), key=lambda p: p.name)
+            if not imagenes:
+                imagenes = [cover]
+            for i, src in enumerate(imagenes):
+                dest_name = f"p{prod_id}_{i:03d}{src.suffix.lower()}"
+                dest = FRONTEND_FOTOS / dest_name
+                if not dest.exists() or src.stat().st_mtime > dest.stat().st_mtime:
+                    shutil.copy2(src, dest)
+                rutas.append(f"fotos/{dest_name}")
+
+    return rutas
+
+
+def exportar_json():
+    """Genera frontend/public/data.json con todos los productos activos."""
     init_db()
-    WEB_DIR.mkdir(exist_ok=True)
-    FOTOS_DIR.mkdir(exist_ok=True)
+    FRONTEND_PUBLIC.mkdir(parents=True, exist_ok=True)
+    FRONTEND_FOTOS.mkdir(parents=True, exist_ok=True)
 
     productos = get_todos_productos(solo_activos=True)
     if not productos:
         print("[AVISO] No hay productos activos en la base de datos.")
-        return
 
-    fotos_map = {}
+    data = []
     for p in productos:
-        fotos_map[p["id"]] = copiar_fotos_producto(p)
+        fotos = copiar_fotos_frontend(p)
+        foto_cover = fotos[0] if fotos else ""
+        data.append({
+            "id":        p["id"],
+            "nombre":    p["nombre"],
+            "precio":    p["precio"],
+            "foto_path": foto_cover,
+            "yupoo_url": p["yupoo_url"],
+            "tallas":    json.loads(p["tallas"]) if isinstance(p["tallas"], str) else p["tallas"],
+            "liga":      p.get("liga", ""),
+            "equipo":    p.get("equipo", ""),
+            "fotos":     fotos,
+        })
 
-    # índice
-    (WEB_DIR / "index.html").write_text(generar_index(productos, fotos_map), encoding="utf-8")
+    out = FRONTEND_PUBLIC / "data.json"
+    out.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
+    total_fotos = sum(len(d["fotos"]) for d in data)
+    print(f"[OK] data.json generado en: {out}")
+    print(f"     {len(data)} productos · {total_fotos} fotos")
 
-    # páginas de detalle
-    for p in productos:
-        html = generar_detalle(p, fotos_map[p["id"]])
-        (WEB_DIR / f"producto_{p['id']}.html").write_text(html, encoding="utf-8")
 
-    print(f"[OK] Web generada en: {WEB_DIR}")
-    print(f"     {len(productos)} productos · {sum(len(v) for v in fotos_map.values())} fotos")
+# ── main ──────────────────────────────────────────────────────────────────────
+
+def generar():
+    # ── Export JSON for the React SPA ──
+    exportar_json()
+
+    # ── Old static HTML generation (kept for reference, commented out) ──
+    # init_db()
+    # WEB_DIR.mkdir(exist_ok=True)
+    # FOTOS_DIR.mkdir(exist_ok=True)
+    # productos = get_todos_productos(solo_activos=True)
+    # if not productos:
+    #     print("[AVISO] No hay productos activos en la base de datos.")
+    #     return
+    # fotos_map = {}
+    # for p in productos:
+    #     fotos_map[p["id"]] = copiar_fotos_producto(p)
+    # (WEB_DIR / "index.html").write_text(generar_index(productos, fotos_map), encoding="utf-8")
+    # for p in productos:
+    #     html = generar_detalle(p, fotos_map[p["id"]])
+    #     (WEB_DIR / f"producto_{p['id']}.html").write_text(html, encoding="utf-8")
+    # print(f"[OK] Web generada en: {WEB_DIR}")
+    # print(f"     {len(productos)} productos · {sum(len(v) for v in fotos_map.values())} fotos")
 
 
 if __name__ == "__main__":
