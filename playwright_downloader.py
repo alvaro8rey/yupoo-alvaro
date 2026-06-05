@@ -443,8 +443,22 @@ def pedir_urls_especificas() -> list[str] | None:
 
 def pedir_carpeta() -> str:
     default = "./fotos_yupoo"
-    console.print(f"\n[{LPURPLE}]Carpeta de destino[/] [dim](Enter para usar {default})[/]")
-    carpeta = Prompt.ask(f"[{PURPLE}]>[/]", default=default).strip()
+    console.print(f"\n[{LPURPLE}]Selecciona la carpeta de destino...[/]")
+    try:
+        import tkinter as tk
+        from tkinter import filedialog
+        root = tk.Tk()
+        root.withdraw()
+        root.wm_attributes("-topmost", True)
+        carpeta = filedialog.askdirectory(title="Selecciona carpeta de destino")
+        root.destroy()
+        if carpeta:
+            console.print(f"  [{GREEN}]✓[/] {carpeta}")
+            return carpeta
+    except Exception:
+        pass
+    console.print(f"[dim](No se pudo abrir el selector, escribe la ruta)[/]")
+    carpeta = Prompt.ask(f"[{PURPLE}]Carpeta[/]", default=default).strip()
     return carpeta or default
 
 
