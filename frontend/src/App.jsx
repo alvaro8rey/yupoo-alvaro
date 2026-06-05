@@ -4,7 +4,7 @@ import ProductGrid from './components/ProductGrid.jsx';
 import ProductDetail from './components/ProductDetail.jsx';
 
 // ── Config ────────────────────────────────────────────────────────────────────
-const BOT_USERNAME = "tu_bot"; // ← change this
+const BOT_USERNAME = "camisetasgalbot"; // ← change this
 const STORE_NAME = "Camisetas Premium";
 // ─────────────────────────────────────────────────────────────────────────────
 

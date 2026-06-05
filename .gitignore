@@ -2,10 +2,11 @@ teste.py
 __pycache__/*
 .md
 requirements.txt
-*.json
+tienda.json
 info.log
 tienda.db
 web/
 
 frontend/node_modules/
 frontend/dist/
+!frontend/package.json
