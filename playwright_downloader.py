@@ -166,9 +166,14 @@ class YupooPlaywright:
         """Navega a la URL de imagen con el browser y captura los bytes."""
         result = {}
         async def on_resp(response):
-            if response.url == url and not result:
+            if result:
+                return
+            ct = response.headers.get("content-type", "")
+            if "image" in ct:
                 try:
-                    result["body"] = await response.body()
+                    body = await response.body()
+                    if body and len(body) > 1000:
+                        result["body"] = body
                 except Exception:
                     pass
         page.on("response", on_resp)
@@ -176,8 +181,10 @@ class YupooPlaywright:
             await page.goto(url, wait_until="domcontentloaded", timeout=15000)
         except Exception:
             pass
-        await asyncio.sleep(0.3)
+        await asyncio.sleep(0.5)
         page.remove_listener("response", on_resp)
+        if not result:
+            log.warning(f"No se recibió imagen válida para: {url}")
         return result.get("body")
 
     async def _fetch_via_browser(self, page: Page, url: str) -> bytes | None:
@@ -342,9 +349,7 @@ class YupooPlaywright:
             async with aiofiles.open(path, "wb") as f:
                 await f.write(buf.getvalue())
         except Exception as e:
-            log.warning(f"Error procesando {path.name}: {e} — guardando raw")
-            async with aiofiles.open(path, "wb") as f:
-                await f.write(img_bytes)
+            log.warning(f"Imagen inválida {path.name}: {e} — descartada")
 
     # -------------------------------------------------------- run
 
