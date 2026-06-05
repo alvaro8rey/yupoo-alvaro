@@ -95,7 +95,7 @@ class App():
 					return f"[#baa6ff]{warning_message}[/]"
 				else:
 					return None
-		except requests.ReadTimeout:
+		except Exception:
 			pass
 
 	def execute_answer(self):
