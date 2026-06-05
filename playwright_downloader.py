@@ -179,15 +179,23 @@ class YupooPlaywright:
             log.info(f"  [skip] {folder}")
             return
 
-        # si la carpeta ya existe con contenido, añadir sufijo numérico
+        # resolver colisiones de nombre usando .url para identificar cada álbum
+        album_url_clean = re.sub(r'\?.*$', '', album["url"])
         base_dir = album_dir
         n = 2
         while album_dir.exists() and any(album_dir.iterdir()):
+            url_file = album_dir / ".url"
+            if url_file.exists() and url_file.read_text().strip() == album_url_clean:
+                # misma carpeta, mismo álbum → skip
+                log.info(f"  [skip] {album_dir.name}")
+                return
+            # carpeta con otro álbum → probar siguiente sufijo
             album_dir = base_dir.parent / f"{base_dir.name} - {n}"
             n += 1
 
         log.info(f"  Álbum: {title_raw!r} -> {album_dir.name!r}")
         album_dir.mkdir(parents=True, exist_ok=True)
+        (album_dir / ".url").write_text(album_url_clean)
 
         # modo solo portadas: entrar al álbum y coger solo la primera imagen
         if self.covers_only:
