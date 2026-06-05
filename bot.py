@@ -34,18 +34,16 @@ ADMIN_CHAT_ID = int(os.environ.get("ADMIN_CHAT_ID", "0"))
 PAYPAL_USER   = os.environ.get("PAYPAL_USER", "tu.paypal@email.com")
 BIZUM_NUMERO  = os.environ.get("BIZUM_NUMERO", "")
 BOT_USERNAME  = os.environ.get("BOT_USERNAME", "tu_bot")
+STORE_NAME    = os.environ.get("STORE_NAME", "Camisetas Premium")
 
-PRECIO_BASE           = 18.0
-PRECIO_NOMBRE_NUMERO  = 21.0
-PRECIO_CON_PARCHES    = 22.0
+PRECIO_BASE          = 18.0
+PRECIO_NOMBRE_NUMERO = 21.0
+PRECIO_CON_PARCHES   = 22.0
 
-logging.basicConfig(
-    format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
-    level=logging.INFO,
-)
+logging.basicConfig(format="%(asctime)s - %(name)s - %(levelname)s - %(message)s", level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-# ── Estados del ConversationHandler ─────────────────────────────────────────
+# ── Estados ──────────────────────────────────────────────────────────────────
 (
     ESPERANDO_PRODUCTO_ID,
     ESPERANDO_CONFIRMACION_PRODUCTO,
@@ -55,7 +53,7 @@ logger = logging.getLogger(__name__)
     ESPERANDO_NUMERO_DORSAL,
     ESPERANDO_OTRO_PRODUCTO,
     ESPERANDO_DATOS_ENVIO,
-    ESPERANDO_REFERENCIA_PAYPAL,
+    ESPERANDO_REFERENCIA_PAGO,
 ) = range(9)
 
 # ── Carrito en memoria ───────────────────────────────────────────────────────
@@ -63,290 +61,409 @@ carritos: dict[int, dict] = {}
 
 def get_carrito(chat_id: int) -> dict:
     if chat_id not in carritos:
-        carritos[chat_id] = {"items": [], "producto_actual": None}
+        carritos[chat_id] = {"items": []}
     return carritos[chat_id]
 
 def limpiar_carrito(chat_id: int):
-    carritos[chat_id] = {"items": [], "producto_actual": None}
+    carritos[chat_id] = {"items": []}
 
-
-# ── Teclado principal (siempre visible) ─────────────────────────────────────
-
+# ── Teclado principal ─────────────────────────────────────────────────────────
 MENU_KEYBOARD = ReplyKeyboardMarkup(
     [
-        [KeyboardButton("🛒 Nuevo pedido"), KeyboardButton("🛍 Mi carrito")],
-        [KeyboardButton("📦 Mis pedidos"),  KeyboardButton("❓ Ayuda")],
+        [KeyboardButton("🛍 Catálogo"),    KeyboardButton("🛒 Mi carrito")],
+        [KeyboardButton("📦 Mis pedidos"), KeyboardButton("❓ Ayuda")],
     ],
     resize_keyboard=True,
     is_persistent=True,
 )
 
 
-# ── Helpers de texto ─────────────────────────────────────────────────────────
-
-def formato_producto(p: dict) -> str:
-    tallas = json.loads(p.get("tallas", '["S","M","L","XL","XXL"]'))
-    return (
-        f"*{p['nombre']}*\n"
-        f"Precio desde: *{PRECIO_BASE:.0f} €*\n"
-        f"Tallas disponibles: {', '.join(tallas)}\n"
-        f"ID: `#{p['id']}`"
-    )
-
-
-def formato_resumen_carrito(items: list[dict]) -> str:
-    if not items:
-        return "_Carrito vacío_"
-    lineas = []
-    total = 0.0
-    for i, item in enumerate(items, 1):
-        precio_item = item["precio_unitario"] * item["cantidad"]
-        total += precio_item
-        pers = ""
-        if item.get("personalizado"):
-            tipo = item.get("tipo_personalizacion", "")
-            parches_txt = " + parches" if tipo == "nombre_numero_parches" else ""
-            pers = f" | Dorsal: {item.get('nombre_dorsal','')} #{item.get('numero_dorsal','')}{parches_txt}"
-        lineas.append(
-            f"{i}. *{item['nombre_producto']}* — Talla {item['talla']}"
-            f"{pers} × {item['cantidad']} = {precio_item:.2f} €"
-        )
-    lineas.append(f"\n💰 *Total: {total:.2f} €*")
-    return "\n".join(lineas)
-
+# ── Helpers ───────────────────────────────────────────────────────────────────
 
 def calcular_total(items: list[dict]) -> float:
     return sum(it["precio_unitario"] * it["cantidad"] for it in items)
 
+def estado_emoji(estado: str) -> str:
+    return {
+        "pendiente_pago": "⏳",
+        "en_proceso":     "🔄",
+        "enviado":        "🚚",
+        "cancelado":      "❌",
+    }.get(estado, "•")
 
-def formato_pedido_completo(pedido: dict, items: list[dict]) -> str:
-    estado = db.estado_label(pedido["estado"])
-    items_txt = []
-    for it in items:
+def estado_texto(estado: str) -> str:
+    return {
+        "pendiente_pago": "Pendiente de pago",
+        "en_proceso":     "En proceso",
+        "enviado":        "Enviado",
+        "cancelado":      "Cancelado",
+    }.get(estado, estado)
+
+def precio_personalizacion(tipo: str) -> float:
+    return {"nombre_numero": PRECIO_NOMBRE_NUMERO, "nombre_numero_parches": PRECIO_CON_PARCHES}.get(tipo, PRECIO_BASE)
+
+def resumen_carrito_texto(items: list[dict]) -> str:
+    if not items:
+        return "_Tu carrito está vacío_"
+    lineas = []
+    for i, it in enumerate(items, 1):
+        subtotal = it["precio_unitario"] * it["cantidad"]
         pers = ""
         if it.get("personalizado"):
-            tipo = it.get("tipo_personalizacion", "")
-            parches_txt = " + parches" if tipo == "nombre_numero_parches" else ""
-            pers = f"\n     ✏️ Dorsal: *{it['nombre_dorsal']} #{it['numero_dorsal']}*{parches_txt}"
-        items_txt.append(
-            f"  • {it['nombre_producto']} — Talla *{it['talla']}*"
-            f" × {it['cantidad']} — {it['precio_unitario']:.2f} €/u{pers}"
-        )
+            parches = " + parches" if it.get("tipo_personalizacion") == "nombre_numero_parches" else ""
+            pers = f"\n   ✏️ {it.get('nombre_dorsal','')} #{it.get('numero_dorsal','')}{parches}"
+        lineas.append(f"{i}. *{it['nombre_producto']}* · Talla {it['talla']} · {subtotal:.0f}€{pers}")
+    total = calcular_total(items)
+    lineas.append(f"\n💰 *Total: {total:.2f} €*")
+    return "\n".join(lineas)
+
+def texto_producto(p: dict) -> str:
+    tallas = json.loads(p.get("tallas") or '["S","M","L","XL","XXL"]')
+    liga = p.get("liga", "")
+    equipo = p.get("equipo", "")
+    cat = f"{liga} · {equipo}" if liga and equipo else liga or equipo
     return (
-        f"📦 *Pedido #{pedido['id']}*\n"
-        f"Estado: {estado}\n"
-        f"Fecha: {pedido['created_at'][:16]}\n\n"
-        f"👤 *Cliente:* {pedido['nombre_cliente']}\n"
-        f"📍 *Dirección:* {pedido['direccion']}\n"
-        f"💳 *Ref PayPal:* `{pedido['paypal_ref']}`\n\n"
-        f"*Productos:*\n" + "\n".join(items_txt) + f"\n\n"
-        f"💰 *Total: {pedido['total']:.2f} €*"
-        + (f"\n📝 Notas: {pedido['notas']}" if pedido.get("notas") else "")
+        f"👕 *{p['nombre']}*\n"
+        + (f"🏆 {cat}\n" if cat else "")
+        + f"\n💶 Desde *{PRECIO_BASE:.0f}€* sin personalizar\n"
+        f"   Con nombre y número: *{PRECIO_NOMBRE_NUMERO:.0f}€*\n"
+        f"   Con nombre, número y parches: *{PRECIO_CON_PARCHES:.0f}€*\n\n"
+        f"📏 Tallas: {', '.join(tallas)}\n"
+        f"🔖 Ref: `#{p['id']}`"
     )
 
 
-# ── Menú principal ────────────────────────────────────────────────────────────
+# ── /start ────────────────────────────────────────────────────────────────────
 
 async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     db.init_db()
     chat_id = update.effective_chat.id
+    user = update.effective_user
     limpiar_carrito(chat_id)
 
+    # deep link producto
     args = context.args or []
-    producto_id = None
     if args and args[0].startswith("producto_"):
         try:
-            producto_id = int(args[0].split("_", 1)[1])
+            pid = int(args[0].split("_", 1)[1])
+            producto = db.get_producto(pid)
+            if producto:
+                get_carrito(chat_id)["producto_actual"] = producto
+                await update.message.reply_text(
+                    f"👋 Hola, *{user.first_name}*! Te enviamos directamente a este producto:",
+                    parse_mode=ParseMode.MARKDOWN,
+                    reply_markup=MENU_KEYBOARD,
+                )
+                return await _mostrar_producto_y_confirmar(update, context, producto)
         except (ValueError, IndexError):
             pass
 
-    bienvenida = (
-        "👕 *Bienvenido a la tienda de camisetas*\n\n"
-        "Usa los botones del menú o /ayuda para ver las opciones disponibles.\n\n"
-    )
-
-    if producto_id is not None:
-        producto = db.get_producto(producto_id)
-        if producto:
-            get_carrito(chat_id)["producto_actual"] = producto
-            await update.message.reply_text(
-                bienvenida, parse_mode=ParseMode.MARKDOWN, reply_markup=MENU_KEYBOARD
-            )
-            return await _mostrar_producto_y_confirmar(update, context, producto)
-        else:
-            await update.message.reply_text(
-                bienvenida + f"⚠️ El producto #{producto_id} no está disponible.\n"
-                "Escribe el *ID del producto* que quieres pedir:",
-                parse_mode=ParseMode.MARKDOWN,
-                reply_markup=MENU_KEYBOARD,
-            )
-            return ESPERANDO_PRODUCTO_ID
+    productos = db.get_todos_productos(solo_activos=True)
+    n = len(productos)
 
     await update.message.reply_text(
-        bienvenida + "Escribe el *ID del producto* que quieres pedir "
-        "o pulsa *🛒 Nuevo pedido*:",
+        f"👋 ¡Hola, *{user.first_name}*! Bienvenido a *{STORE_NAME}* 👕\n\n"
+        f"Tenemos *{n} modelos* disponibles con envío a toda España.\n\n"
+        f"💶 Precios desde *{PRECIO_BASE:.0f}€*\n"
+        f"✏️ Personalización de dorsales disponible\n"
+        f"💳 Pago por PayPal" + (f" o Bizum" if BIZUM_NUMERO else "") + "\n\n"
+        f"Usa el menú de abajo para navegar 👇",
         parse_mode=ParseMode.MARKDOWN,
         reply_markup=MENU_KEYBOARD,
     )
-    return ESPERANDO_PRODUCTO_ID
+    return ConversationHandler.END
 
 
-async def menu_nuevo_pedido(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-    """Botón 🛒 Nuevo pedido desde el menú."""
-    chat_id = update.effective_chat.id
-    limpiar_carrito(chat_id)
+# ── Catálogo ──────────────────────────────────────────────────────────────────
+
+async def menu_catalogo(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Muestra las ligas disponibles como botones."""
+    productos = db.get_todos_productos(solo_activos=True)
+    if not productos:
+        await update.message.reply_text("No hay productos disponibles ahora mismo.")
+        return
+
+    # Agrupa por liga
+    ligas: dict[str, int] = {}
+    for p in productos:
+        liga = p.get("liga") or "Sin categoría"
+        ligas[liga] = ligas.get(liga, 0) + 1
+
+    botones = []
+    for liga, cnt in sorted(ligas.items()):
+        botones.append([InlineKeyboardButton(f"🏆 {liga}  ({cnt})", callback_data=f"cat_liga_{liga}")])
+    botones.append([InlineKeyboardButton("📋 Ver todos", callback_data="cat_todos")])
+
     await update.message.reply_text(
-        "Escribe el *ID del producto* que quieres pedir\n"
-        "_(puedes verlo en el catálogo)_:",
+        f"🛍 *Catálogo — {len(productos)} productos*\n\nElige una liga o categoría:",
         parse_mode=ParseMode.MARKDOWN,
+        reply_markup=InlineKeyboardMarkup(botones),
     )
-    return ESPERANDO_PRODUCTO_ID
 
 
-async def menu_mi_carrito(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Botón 🛍 Mi carrito — muestra el carrito activo."""
+async def catalogo_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    await query.answer()
+    data = query.data
+
+    if data == "cat_todos":
+        productos = db.get_todos_productos(solo_activos=True)
+        await _mostrar_lista_productos(query, context, productos, "Todos los productos")
+
+    elif data.startswith("cat_liga_"):
+        liga = data[len("cat_liga_"):]
+        productos = db.get_todos_productos(solo_activos=True)
+        equipos: dict[str, list] = {}
+        for p in productos:
+            if (p.get("liga") or "Sin categoría") == liga:
+                eq = p.get("equipo") or "Otros"
+                equipos.setdefault(eq, []).append(p)
+
+        if len(equipos) == 1:
+            prods = list(equipos.values())[0]
+            await _mostrar_lista_productos(query, context, prods, liga)
+        else:
+            botones = []
+            for eq, prods in sorted(equipos.items()):
+                botones.append([InlineKeyboardButton(
+                    f"⚽ {eq}  ({len(prods)})", callback_data=f"cat_equipo_{liga}|{eq}"
+                )])
+            botones.append([InlineKeyboardButton("◀️ Volver", callback_data="cat_volver_ligas")])
+            await query.edit_message_text(
+                f"🏆 *{liga}*\n\nElige un equipo:",
+                parse_mode=ParseMode.MARKDOWN,
+                reply_markup=InlineKeyboardMarkup(botones),
+            )
+
+    elif data.startswith("cat_equipo_"):
+        partes = data[len("cat_equipo_"):].split("|", 1)
+        liga, equipo = partes[0], partes[1]
+        productos = [p for p in db.get_todos_productos(solo_activos=True)
+                     if (p.get("liga") or "") == liga and (p.get("equipo") or "") == equipo]
+        await _mostrar_lista_productos(query, context, productos, f"{equipo}")
+
+    elif data == "cat_volver_ligas":
+        productos = db.get_todos_productos(solo_activos=True)
+        ligas: dict[str, int] = {}
+        for p in productos:
+            liga = p.get("liga") or "Sin categoría"
+            ligas[liga] = ligas.get(liga, 0) + 1
+        botones = []
+        for liga, cnt in sorted(ligas.items()):
+            botones.append([InlineKeyboardButton(f"🏆 {liga}  ({cnt})", callback_data=f"cat_liga_{liga}")])
+        botones.append([InlineKeyboardButton("📋 Ver todos", callback_data="cat_todos")])
+        await query.edit_message_text(
+            f"🛍 *Catálogo*\n\nElige una liga:",
+            parse_mode=ParseMode.MARKDOWN,
+            reply_markup=InlineKeyboardMarkup(botones),
+        )
+
+    elif data.startswith("cat_ver_"):
+        pid = int(data[len("cat_ver_"):])
+        producto = db.get_producto(pid)
+        if not producto:
+            await query.edit_message_text("❌ Producto no disponible.")
+            return
+        chat_id = query.message.chat.id
+        get_carrito(chat_id)["producto_actual"] = producto
+        # Enviar como nuevo mensaje con foto
+        await _mostrar_producto_y_confirmar_desde_catalogo(query, context, producto)
+
+
+async def _mostrar_lista_productos(query, context, productos: list, titulo: str):
+    if not productos:
+        await query.edit_message_text("No hay productos en esta categoría.")
+        return
+    botones = []
+    for p in productos:
+        botones.append([InlineKeyboardButton(
+            f"👕 {p['nombre']}  —  {p['precio']:.0f}€",
+            callback_data=f"cat_ver_{p['id']}"
+        )])
+    botones.append([InlineKeyboardButton("◀️ Volver", callback_data="cat_volver_ligas")])
+    await query.edit_message_text(
+        f"👕 *{titulo}* — {len(productos)} modelo(s)\n\nElige un producto para ver más info:",
+        parse_mode=ParseMode.MARKDOWN,
+        reply_markup=InlineKeyboardMarkup(botones),
+    )
+
+
+async def _mostrar_producto_y_confirmar_desde_catalogo(query, context, producto: dict):
+    chat_id = query.message.chat.id
+    teclado = InlineKeyboardMarkup([[
+        InlineKeyboardButton("🛒 Añadir al carrito", callback_data="confirmar_producto"),
+        InlineKeyboardButton("❌ Cancelar", callback_data="cancelar_pedido"),
+    ]])
+    texto = texto_producto(producto) + "\n\n¿Lo añadimos al carrito?"
+    portada_id = producto.get("portada_id")
+    try:
+        if portada_id:
+            foto = db.get_foto_datos(portada_id)
+            if foto:
+                await context.bot.send_photo(
+                    chat_id=chat_id, photo=foto, caption=texto,
+                    parse_mode=ParseMode.MARKDOWN, reply_markup=teclado,
+                )
+                return
+        await context.bot.send_message(
+            chat_id=chat_id, text=texto,
+            parse_mode=ParseMode.MARKDOWN, reply_markup=teclado,
+        )
+    except TelegramError as e:
+        logger.warning("Error foto: %s", e)
+        await context.bot.send_message(
+            chat_id=chat_id, text=texto,
+            parse_mode=ParseMode.MARKDOWN, reply_markup=teclado,
+        )
+
+
+# ── Carrito ───────────────────────────────────────────────────────────────────
+
+async def menu_carrito(update: Update, context: ContextTypes.DEFAULT_TYPE):
     chat_id = update.effective_chat.id
-    carrito = get_carrito(chat_id)
-    items = carrito.get("items", [])
+    items = get_carrito(chat_id).get("items", [])
 
     if not items:
         await update.message.reply_text(
-            "🛍 Tu carrito está vacío.\n\nUsa *🛒 Nuevo pedido* para empezar.",
+            "🛒 *Tu carrito está vacío*\n\nUsa *🛍 Catálogo* para ver los productos disponibles.",
             parse_mode=ParseMode.MARKDOWN,
         )
         return
 
-    resumen = formato_resumen_carrito(items)
+    resumen = resumen_carrito_texto(items)
     total = calcular_total(items)
 
+    botones = []
+    for i, it in enumerate(items):
+        botones.append([InlineKeyboardButton(
+            f"🗑 Quitar: {it['nombre_producto'][:30]}",
+            callback_data=f"carrito_quitar_{i}"
+        )])
+    botones.append([
+        InlineKeyboardButton("✅ Finalizar pedido", callback_data="carrito_finalizar"),
+        InlineKeyboardButton("🗑 Vaciar", callback_data="carrito_vaciar"),
+    ])
+
     await update.message.reply_text(
-        f"🛍 *Tu carrito actual:*\n\n{resumen}\n\n"
-        f"Tienes {len(items)} producto(s) por *{total:.2f} €*.\n\n"
-        f"Continúa con /start para finalizar el pedido o añadir más productos.",
+        f"🛒 *Tu carrito* — {len(items)} producto(s)\n\n{resumen}",
         parse_mode=ParseMode.MARKDOWN,
+        reply_markup=InlineKeyboardMarkup(botones),
     )
 
 
-async def menu_mis_pedidos(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Botón 📦 Mis pedidos — historial del cliente."""
-    user_id = update.effective_user.id
-    pedidos = db.get_pedidos_usuario(user_id)
+async def carrito_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    await query.answer()
+    chat_id = query.message.chat.id
+    carrito = get_carrito(chat_id)
+    data = query.data
 
-    if not pedidos:
-        await update.message.reply_text(
-            "No tienes pedidos registrados todavía.\n\nUsa *🛒 Nuevo pedido* para hacer tu primer pedido.",
+    if data == "carrito_vaciar":
+        limpiar_carrito(chat_id)
+        await query.edit_message_text("🗑 Carrito vaciado.")
+        return
+
+    elif data.startswith("carrito_quitar_"):
+        idx = int(data.split("_")[-1])
+        if 0 <= idx < len(carrito["items"]):
+            quitado = carrito["items"].pop(idx)
+            await query.answer(f"Quitado: {quitado['nombre_producto']}", show_alert=False)
+        items = carrito["items"]
+        if not items:
+            await query.edit_message_text("🛒 Tu carrito está vacío.")
+            return
+        resumen = resumen_carrito_texto(items)
+        botones = []
+        for i, it in enumerate(items):
+            botones.append([InlineKeyboardButton(
+                f"🗑 Quitar: {it['nombre_producto'][:30]}",
+                callback_data=f"carrito_quitar_{i}"
+            )])
+        botones.append([
+            InlineKeyboardButton("✅ Finalizar pedido", callback_data="carrito_finalizar"),
+            InlineKeyboardButton("🗑 Vaciar", callback_data="carrito_vaciar"),
+        ])
+        await query.edit_message_text(
+            f"🛒 *Tu carrito* — {len(items)} producto(s)\n\n{resumen}",
+            parse_mode=ParseMode.MARKDOWN,
+            reply_markup=InlineKeyboardMarkup(botones),
+        )
+
+    elif data == "carrito_finalizar":
+        if not carrito["items"]:
+            await query.edit_message_text("Tu carrito está vacío.")
+            return
+        await query.edit_message_reply_markup(reply_markup=None)
+        resumen = resumen_carrito_texto(carrito["items"])
+        await context.bot.send_message(
+            chat_id=chat_id,
+            text=(
+                f"📦 *Resumen del pedido:*\n\n{resumen}\n\n"
+                f"Escribe tu *nombre completo y dirección de envío* en un mensaje:\n\n"
+                f"_Ej: Juan García, Calle Mayor 10 2ºA, 28001 Madrid_"
+            ),
             parse_mode=ParseMode.MARKDOWN,
         )
-        return
+        context.user_data["checkout_desde_carrito"] = True
+        return ESPERANDO_DATOS_ENVIO
 
-    lines = [f"*Tus últimos pedidos ({min(len(pedidos),10)}):*\n"]
-    for p in pedidos[:10]:
-        estado = db.estado_label(p["estado"])
-        lines.append(
-            f"📦 *Pedido #{p['id']}* — {estado}\n"
-            f"   Total: {p['total']:.2f} € · {p['created_at'][:10]}"
+
+# ── Flujo de pedido ───────────────────────────────────────────────────────────
+
+async def menu_nuevo_pedido(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    """Entrada al flujo desde catálogo — inicia selección de producto."""
+    chat_id = update.effective_chat.id
+    limpiar_carrito(chat_id)
+    await menu_catalogo(update, context)
+    return ConversationHandler.END
+
+
+async def _mostrar_producto_y_confirmar(update: Update, context: ContextTypes.DEFAULT_TYPE, producto: dict) -> int:
+    teclado = InlineKeyboardMarkup([[
+        InlineKeyboardButton("🛒 Añadir al carrito", callback_data="confirmar_producto"),
+        InlineKeyboardButton("❌ Cancelar", callback_data="cancelar_pedido"),
+    ]])
+    texto = texto_producto(producto) + "\n\n¿Lo añadimos al carrito?"
+    portada_id = producto.get("portada_id")
+    try:
+        if portada_id:
+            foto = db.get_foto_datos(portada_id)
+            if foto:
+                await update.effective_message.reply_photo(
+                    photo=foto, caption=texto,
+                    parse_mode=ParseMode.MARKDOWN, reply_markup=teclado,
+                )
+                return ESPERANDO_CONFIRMACION_PRODUCTO
+        await update.effective_message.reply_text(
+            texto, parse_mode=ParseMode.MARKDOWN, reply_markup=teclado,
         )
-    lines.append("\n_Usa /pedido {número} para ver el detalle de un pedido._")
+    except TelegramError as e:
+        logger.warning("Error foto: %s", e)
+        await update.effective_message.reply_text(
+            texto, parse_mode=ParseMode.MARKDOWN, reply_markup=teclado,
+        )
+    return ESPERANDO_CONFIRMACION_PRODUCTO
 
-    await update.message.reply_text(
-        "\n".join(lines),
-        parse_mode=ParseMode.MARKDOWN,
-    )
-
-
-async def cmd_ver_pedido_cliente(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """El cliente puede ver el detalle de uno de sus pedidos con /pedido {id}."""
-    user_id = update.effective_user.id
-    args = context.args
-    if not args or not args[0].isdigit():
-        await update.message.reply_text("Uso: /pedido {número de pedido}")
-        return
-
-    pedido_id = int(args[0])
-    pedido = db.get_pedido(pedido_id)
-    if not pedido or pedido["usuario_tg"] != user_id:
-        await update.message.reply_text("❌ Pedido no encontrado o no es tuyo.")
-        return
-
-    items = db.get_items_pedido(pedido_id)
-    await update.message.reply_text(
-        formato_pedido_completo(pedido, items),
-        parse_mode=ParseMode.MARKDOWN,
-    )
-
-
-# ── Paso 1: recibir ID de producto ────────────────────────────────────────────
 
 async def recibir_producto_id(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     texto = update.message.text.strip().lstrip("#")
     try:
-        producto_id = int(texto)
+        pid = int(texto)
     except ValueError:
-        await update.message.reply_text(
-            "⚠️ Por favor escribe solo el número del ID del producto."
-        )
+        await update.message.reply_text("⚠️ Escribe solo el número del ID del producto.")
         return ESPERANDO_PRODUCTO_ID
 
-    producto = db.get_producto(producto_id)
+    producto = db.get_producto(pid)
     if not producto:
         await update.message.reply_text(
-            f"❌ No encontré el producto con ID *#{producto_id}*.\n"
-            "Comprueba el catálogo y escribe otro ID:",
+            f"❌ No encontré el producto *#{pid}*. Comprueba el catálogo:",
             parse_mode=ParseMode.MARKDOWN,
         )
         return ESPERANDO_PRODUCTO_ID
 
-    chat_id = update.effective_chat.id
-    get_carrito(chat_id)["producto_actual"] = producto
+    get_carrito(update.effective_chat.id)["producto_actual"] = producto
     return await _mostrar_producto_y_confirmar(update, context, producto)
 
-
-async def _mostrar_producto_y_confirmar(
-    update: Update, context: ContextTypes.DEFAULT_TYPE, producto: dict
-) -> int:
-    teclado = InlineKeyboardMarkup([
-        [
-            InlineKeyboardButton("✅ Sí, lo quiero", callback_data="confirmar_producto"),
-            InlineKeyboardButton("❌ Cancelar", callback_data="cancelar_pedido"),
-        ]
-    ])
-    texto = formato_producto(producto) + "\n\n¿Quieres añadir este producto?"
-    foto_path = producto.get("foto_path", "")
-
-    try:
-        if foto_path and Path(foto_path).exists():
-            with open(foto_path, "rb") as f:
-                await update.effective_message.reply_photo(
-                    photo=f, caption=texto,
-                    parse_mode=ParseMode.MARKDOWN, reply_markup=teclado,
-                )
-        else:
-            portada_id = producto.get("portada_id")
-            if portada_id:
-                foto_bytes = db.get_foto_datos(portada_id)
-                if foto_bytes:
-                    await update.effective_message.reply_photo(
-                        photo=foto_bytes, caption=texto,
-                        parse_mode=ParseMode.MARKDOWN, reply_markup=teclado,
-                    )
-                else:
-                    await update.effective_message.reply_text(
-                        texto, parse_mode=ParseMode.MARKDOWN, reply_markup=teclado,
-                    )
-            else:
-                await update.effective_message.reply_text(
-                    texto, parse_mode=ParseMode.MARKDOWN, reply_markup=teclado,
-                )
-    except TelegramError as e:
-        logger.warning("Error enviando foto: %s", e)
-        await update.effective_message.reply_text(
-            texto, parse_mode=ParseMode.MARKDOWN, reply_markup=teclado,
-        )
-
-    return ESPERANDO_CONFIRMACION_PRODUCTO
-
-
-# ── Paso 2: confirmar producto ────────────────────────────────────────────────
 
 async def confirmar_producto(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     query = update.callback_query
@@ -355,27 +472,26 @@ async def confirmar_producto(update: Update, context: ContextTypes.DEFAULT_TYPE)
     if query.data == "cancelar_pedido":
         return await _cancelar_conversacion(update, context)
 
-    chat_id = update.effective_chat.id
+    chat_id = query.message.chat.id
     carrito = get_carrito(chat_id)
     producto = carrito.get("producto_actual")
     if not producto:
-        await query.edit_message_text("⚠️ Error interno. Usa /start para comenzar.")
+        await query.edit_message_text("⚠️ Error. Usa /start.")
         return ConversationHandler.END
 
-    tallas = json.loads(producto.get("tallas", '["S","M","L","XL","XXL"]'))
+    tallas = json.loads(producto.get("tallas") or '["S","M","L","XL","XXL"]')
     botones = [[InlineKeyboardButton(t, callback_data=f"talla_{t}")] for t in tallas]
     botones.append([InlineKeyboardButton("❌ Cancelar", callback_data="cancelar_pedido")])
 
     await query.edit_message_reply_markup(reply_markup=None)
     await context.bot.send_message(
         chat_id=chat_id,
-        text="👕 ¿Qué talla quieres?",
+        text=f"👕 *{producto['nombre']}*\n\n¿Qué talla quieres?",
+        parse_mode=ParseMode.MARKDOWN,
         reply_markup=InlineKeyboardMarkup(botones),
     )
     return ESPERANDO_TALLA
 
-
-# ── Paso 3: elegir talla ──────────────────────────────────────────────────────
 
 async def elegir_talla(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     query = update.callback_query
@@ -385,74 +501,53 @@ async def elegir_talla(update: Update, context: ContextTypes.DEFAULT_TYPE) -> in
         return await _cancelar_conversacion(update, context)
 
     talla = query.data.replace("talla_", "")
-    chat_id = update.effective_chat.id
-    get_carrito(chat_id)["talla_actual"] = talla
+    get_carrito(query.message.chat.id)["talla_actual"] = talla
 
     await query.edit_message_reply_markup(reply_markup=None)
     await context.bot.send_message(
-        chat_id=chat_id,
-        text=f"Talla seleccionada: *{talla}*\n\n¿Quieres personalización?",
+        chat_id=query.message.chat.id,
+        text=f"Talla: *{talla}* ✓\n\n¿Quieres personalización en el dorsal?",
         parse_mode=ParseMode.MARKDOWN,
         reply_markup=InlineKeyboardMarkup([
-            [InlineKeyboardButton(
-                f"Sin personalización ({PRECIO_BASE:.0f}€)", callback_data="pers_sin"
-            )],
-            [InlineKeyboardButton(
-                f"Con nombre y número ({PRECIO_NOMBRE_NUMERO:.0f}€)", callback_data="pers_nombre_numero"
-            )],
-            [InlineKeyboardButton(
-                f"Con nombre, número y parches ({PRECIO_CON_PARCHES:.0f}€)", callback_data="pers_con_parches"
-            )],
-            [InlineKeyboardButton("❌ Cancelar", callback_data="cancelar_pedido")],
+            [InlineKeyboardButton(f"❌ Sin personalización — {PRECIO_BASE:.0f}€", callback_data="pers_sin")],
+            [InlineKeyboardButton(f"✏️ Nombre + número — {PRECIO_NOMBRE_NUMERO:.0f}€", callback_data="pers_nombre_numero")],
+            [InlineKeyboardButton(f"✏️ Nombre + número + parches — {PRECIO_CON_PARCHES:.0f}€", callback_data="pers_con_parches")],
+            [InlineKeyboardButton("🚫 Cancelar", callback_data="cancelar_pedido")],
         ]),
     )
     return ESPERANDO_PERSONALIZACION
 
 
-# ── Paso 4: personalización ───────────────────────────────────────────────────
-
 async def elegir_personalizacion(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     query = update.callback_query
     await query.answer()
-
-    chat_id = update.effective_chat.id
-    carrito = get_carrito(chat_id)
     await query.edit_message_reply_markup(reply_markup=None)
 
+    chat_id = query.message.chat.id
+    carrito = get_carrito(chat_id)
+
+    if query.data == "cancelar_pedido":
+        return await _cancelar_conversacion(update, context)
+
     if query.data == "pers_sin":
-        carrito.update({
-            "personalizado_actual": False,
-            "tipo_personalizacion_actual": "sin_personalizacion",
-            "nombre_dorsal_actual": "",
-            "numero_dorsal_actual": "",
-        })
+        carrito.update({"personalizado_actual": False, "tipo_personalizacion_actual": "sin_personalizacion",
+                        "nombre_dorsal_actual": "", "numero_dorsal_actual": ""})
         return await _agregar_item_al_carrito(update, context)
-    elif query.data in ("pers_nombre_numero", "pers_con_parches"):
-        carrito["personalizado_actual"] = True
-        carrito["tipo_personalizacion_actual"] = (
-            "nombre_numero" if query.data == "pers_nombre_numero" else "nombre_numero_parches"
-        )
-        await context.bot.send_message(
-            chat_id=chat_id,
-            text="✏️ Escribe el *nombre* que quieres en el dorsal:",
-            parse_mode=ParseMode.MARKDOWN,
-        )
-        return ESPERANDO_NOMBRE_DORSAL
-    else:
-        carrito.update({
-            "personalizado_actual": False,
-            "tipo_personalizacion_actual": "sin_personalizacion",
-            "nombre_dorsal_actual": "",
-            "numero_dorsal_actual": "",
-        })
-        return await _agregar_item_al_carrito(update, context)
+
+    carrito["personalizado_actual"] = True
+    carrito["tipo_personalizacion_actual"] = "nombre_numero" if query.data == "pers_nombre_numero" else "nombre_numero_parches"
+    await context.bot.send_message(
+        chat_id=chat_id,
+        text="✏️ Escribe el *nombre* para el dorsal:",
+        parse_mode=ParseMode.MARKDOWN,
+    )
+    return ESPERANDO_NOMBRE_DORSAL
 
 
 async def recibir_nombre_dorsal(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-    nombre_dorsal = update.message.text.strip()
-    get_carrito(update.effective_chat.id)["nombre_dorsal_actual"] = nombre_dorsal
+    get_carrito(update.effective_chat.id)["nombre_dorsal_actual"] = update.message.text.strip().upper()
     await update.message.reply_text(
-        f"Nombre: *{nombre_dorsal}*\n\nAhora escribe el *número* del dorsal:",
+        f"Nombre: *{update.message.text.strip().upper()}* ✓\n\nAhora escribe el *número* del dorsal:",
         parse_mode=ParseMode.MARKDOWN,
     )
     return ESPERANDO_NUMERO_DORSAL
@@ -467,12 +562,7 @@ async def _agregar_item_al_carrito(update: Update, context: ContextTypes.DEFAULT
     chat_id = update.effective_chat.id
     carrito = get_carrito(chat_id)
     producto = carrito["producto_actual"]
-
     tipo_pers = carrito.get("tipo_personalizacion_actual", "sin_personalizacion")
-    precio_unitario = {
-        "nombre_numero": PRECIO_NOMBRE_NUMERO,
-        "nombre_numero_parches": PRECIO_CON_PARCHES,
-    }.get(tipo_pers, PRECIO_BASE)
 
     item = {
         "producto_id": producto["id"],
@@ -483,40 +573,31 @@ async def _agregar_item_al_carrito(update: Update, context: ContextTypes.DEFAULT
         "nombre_dorsal": carrito.get("nombre_dorsal_actual", ""),
         "numero_dorsal": carrito.get("numero_dorsal_actual", ""),
         "cantidad": 1,
-        "precio_unitario": precio_unitario,
+        "precio_unitario": precio_personalizacion(tipo_pers),
     }
     carrito["items"].append(item)
-
     for k in ("producto_actual", "talla_actual", "personalizado_actual",
               "tipo_personalizacion_actual", "nombre_dorsal_actual", "numero_dorsal_actual"):
         carrito.pop(k, None)
 
-    resumen = formato_resumen_carrito(carrito["items"])
-    msg = (
-        f"✅ Producto añadido al carrito.\n\n"
-        f"*Tu carrito:*\n{resumen}\n\n"
-        f"¿Quieres añadir otro producto?"
-    )
-    teclado = InlineKeyboardMarkup([
-        [
-            InlineKeyboardButton("➕ Añadir otro", callback_data="otro_si"),
-            InlineKeyboardButton("🛒 Finalizar", callback_data="otro_no"),
-        ]
-    ])
+    resumen = resumen_carrito_texto(carrito["items"])
+    total = calcular_total(carrito["items"])
 
+    teclado = InlineKeyboardMarkup([
+        [InlineKeyboardButton("➕ Seguir comprando", callback_data="otro_si"),
+         InlineKeyboardButton("✅ Finalizar pedido", callback_data="otro_no")],
+    ])
+    msg = (
+        f"✅ *¡Añadido al carrito!*\n\n"
+        f"{resumen}\n\n"
+        f"¿Quieres añadir otro producto o finalizar el pedido?"
+    )
     if update.callback_query:
-        await context.bot.send_message(
-            chat_id=chat_id, text=msg,
-            parse_mode=ParseMode.MARKDOWN, reply_markup=teclado,
-        )
+        await context.bot.send_message(chat_id=chat_id, text=msg, parse_mode=ParseMode.MARKDOWN, reply_markup=teclado)
     else:
-        await update.message.reply_text(
-            msg, parse_mode=ParseMode.MARKDOWN, reply_markup=teclado,
-        )
+        await update.message.reply_text(msg, parse_mode=ParseMode.MARKDOWN, reply_markup=teclado)
     return ESPERANDO_OTRO_PRODUCTO
 
-
-# ── Paso 5: ¿otro producto? ───────────────────────────────────────────────────
 
 async def otro_producto(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     query = update.callback_query
@@ -524,41 +605,42 @@ async def otro_producto(update: Update, context: ContextTypes.DEFAULT_TYPE) -> i
     await query.edit_message_reply_markup(reply_markup=None)
 
     if query.data == "otro_si":
+        productos = db.get_todos_productos(solo_activos=True)
+        ligas: dict[str, int] = {}
+        for p in productos:
+            liga = p.get("liga") or "Sin categoría"
+            ligas[liga] = ligas.get(liga, 0) + 1
+        botones = [[InlineKeyboardButton(f"🏆 {l}  ({c})", callback_data=f"cat_liga_{l}")] for l, c in sorted(ligas.items())]
+        botones.append([InlineKeyboardButton("📋 Ver todos", callback_data="cat_todos")])
         await context.bot.send_message(
-            chat_id=update.effective_chat.id,
-            text="Escribe el *ID del siguiente producto* que quieres añadir:",
-            parse_mode=ParseMode.MARKDOWN,
+            chat_id=query.message.chat.id,
+            text="¿Qué producto quieres añadir?",
+            reply_markup=InlineKeyboardMarkup(botones),
         )
-        return ESPERANDO_PRODUCTO_ID
+        return ConversationHandler.END
     else:
         return await _pedir_datos_envio(update, context)
 
 
 async def _pedir_datos_envio(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     chat_id = update.effective_chat.id
-    carrito = get_carrito(chat_id)
-    resumen = formato_resumen_carrito(carrito["items"])
-
+    resumen = resumen_carrito_texto(get_carrito(chat_id)["items"])
     await context.bot.send_message(
         chat_id=chat_id,
         text=(
-            f"*Resumen de tu pedido:*\n{resumen}\n\n"
-            f"Por favor escribe tu *nombre completo y dirección de envío* en un solo mensaje.\n\n"
-            f"_Ejemplo: Juan García López, Calle Mayor 10 2ºA, 28001 Madrid_"
+            f"📦 *Resumen del pedido:*\n\n{resumen}\n\n"
+            f"Escribe tu *nombre completo y dirección de envío*:\n\n"
+            f"_Ej: Juan García, Calle Mayor 10 2ºA, 28001 Madrid_"
         ),
         parse_mode=ParseMode.MARKDOWN,
     )
     return ESPERANDO_DATOS_ENVIO
 
 
-# ── Paso 6: datos de envío ────────────────────────────────────────────────────
-
 async def recibir_datos_envio(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     datos = update.message.text.strip()
     if len(datos) < 10:
-        await update.message.reply_text(
-            "⚠️ Por favor escribe tu nombre completo y dirección completa."
-        )
+        await update.message.reply_text("⚠️ Escribe tu nombre completo y dirección completa.")
         return ESPERANDO_DATOS_ENVIO
 
     chat_id = update.effective_chat.id
@@ -566,29 +648,27 @@ async def recibir_datos_envio(update: Update, context: ContextTypes.DEFAULT_TYPE
     carrito["datos_envio"] = datos
     total = calcular_total(carrito["items"])
 
+    pago_txt = f"• PayPal: *paypal.me/{PAYPAL_USER}*\n"
+    if BIZUM_NUMERO:
+        pago_txt += f"• Bizum: *{BIZUM_NUMERO}*\n"
+
     await update.message.reply_text(
-        f"📦 *Datos de envío registrados.*\n\n"
-        f"💳 *Instrucciones de pago:*\n"
-        f"El total de tu pedido es *{total:.2f} €*.\n\n"
-        f"Puedes pagar por:\n\n"
-        f"• *PayPal:* paypal.me/{PAYPAL_USER}\n"
-        + (f"• *Bizum:* {BIZUM_NUMERO}\n" if BIZUM_NUMERO else "")
-        + f"\n⚠️ Indica tu nombre en el *concepto/nota* del pago.\n\n"
-        f"Una vez realizado, escribe aquí el *ID de transacción o referencia de pago*:",
+        f"✅ *Dirección registrada.*\n\n"
+        f"💳 *Instrucciones de pago*\n"
+        f"Total a pagar: *{total:.2f} €*\n\n"
+        f"{pago_txt}\n"
+        f"⚠️ Pon tu nombre en el *concepto* del pago.\n\n"
+        f"Una vez pagado, escribe aquí el *ID o referencia del pago*:",
         parse_mode=ParseMode.MARKDOWN,
     )
-    return ESPERANDO_REFERENCIA_PAYPAL
+    return ESPERANDO_REFERENCIA_PAGO
 
 
-# ── Paso 7: referencia PayPal → guardar pedido ───────────────────────────────
-
-async def recibir_referencia_paypal(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-    paypal_ref = update.message.text.strip()
-    if len(paypal_ref) < 3:
-        await update.message.reply_text(
-            "⚠️ Por favor escribe la referencia o ID de transacción de PayPal."
-        )
-        return ESPERANDO_REFERENCIA_PAYPAL
+async def recibir_referencia_pago(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    ref = update.message.text.strip()
+    if len(ref) < 3:
+        await update.message.reply_text("⚠️ Escribe la referencia o ID del pago.")
+        return ESPERANDO_REFERENCIA_PAGO
 
     chat_id = update.effective_chat.id
     user = update.effective_user
@@ -603,179 +683,301 @@ async def recibir_referencia_paypal(update: Update, context: ContextTypes.DEFAUL
 
     try:
         pedido_id = db.crear_pedido(
-            usuario_tg=user.id,
-            username_tg=user.username or "",
-            nombre_cliente=nombre_cliente,
-            direccion=direccion,
-            total=total,
-            paypal_ref=paypal_ref,
+            usuario_tg=user.id, username_tg=user.username or "",
+            nombre_cliente=nombre_cliente, direccion=direccion,
+            total=total, paypal_ref=ref,
         )
         for item in items:
             db.agregar_item_pedido(
-                pedido_id=pedido_id,
-                producto_id=item["producto_id"],
-                talla=item["talla"],
-                personalizado=item["personalizado"],
+                pedido_id=pedido_id, producto_id=item["producto_id"],
+                talla=item["talla"], personalizado=item["personalizado"],
                 tipo_personalizacion=item.get("tipo_personalizacion", "sin_personalizacion"),
-                nombre_dorsal=item.get("nombre_dorsal", ""),
-                numero_dorsal=item.get("numero_dorsal", ""),
-                cantidad=item["cantidad"],
-                precio_unitario=item["precio_unitario"],
+                nombre_dorsal=item.get("nombre_dorsal", ""), numero_dorsal=item.get("numero_dorsal", ""),
+                cantidad=item["cantidad"], precio_unitario=item["precio_unitario"],
             )
     except Exception as e:
         logger.error("Error guardando pedido: %s", e)
-        await update.message.reply_text(
-            "❌ Hubo un error al guardar tu pedido. Por favor contacta con nosotros."
-        )
+        await update.message.reply_text("❌ Error al guardar el pedido. Contacta con nosotros.")
         return ConversationHandler.END
 
     limpiar_carrito(chat_id)
 
     await update.message.reply_text(
-        f"✅ *Pedido #{pedido_id} registrado correctamente.*\n\n"
-        f"Estado: ⏳ Pendiente de verificación de pago\n"
-        f"Total: *{total:.2f} €*\n"
-        f"Referencia PayPal: `{paypal_ref}`\n\n"
-        f"Verificaremos el pago y te avisaremos en cuanto esté confirmado. ¡Gracias! 🙏",
+        f"🎉 *¡Pedido #{pedido_id} recibido!*\n\n"
+        f"📋 Resumen:\n"
+        f"• Total: *{total:.2f} €*\n"
+        f"• Referencia de pago: `{ref}`\n"
+        f"• Estado: ⏳ Pendiente de verificación\n\n"
+        f"Verificaremos el pago y te avisaremos enseguida.\n"
+        f"Puedes seguir el estado en *📦 Mis pedidos*. ¡Gracias! 🙏",
         parse_mode=ParseMode.MARKDOWN,
     )
 
-    await _notificar_admin_nuevo_pedido(context, pedido_id, user, nombre_cliente, direccion, total, items, paypal_ref)
+    await _notificar_admin(context, pedido_id, user, nombre_cliente, direccion, total, items, ref)
     return ConversationHandler.END
 
 
-async def _notificar_admin_nuevo_pedido(
-    context: ContextTypes.DEFAULT_TYPE,
-    pedido_id: int,
-    user,
-    nombre_cliente: str,
-    direccion: str,
-    total: float,
-    items: list[dict],
-    paypal_ref: str,
-):
-    if not ADMIN_CHAT_ID:
+# ── Mis pedidos ───────────────────────────────────────────────────────────────
+
+async def menu_mis_pedidos(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user_id = update.effective_user.id
+    pedidos = db.get_pedidos_usuario(user_id)
+
+    if not pedidos:
+        await update.message.reply_text(
+            "📦 *Aún no tienes pedidos.*\n\nUsa *🛍 Catálogo* para ver los productos disponibles.",
+            parse_mode=ParseMode.MARKDOWN,
+        )
         return
 
-    username = f"@{user.username}" if user.username else f"ID:{user.id}"
+    botones = []
+    for p in pedidos[:10]:
+        em = estado_emoji(p["estado"])
+        fecha = str(p["created_at"])[:10]
+        botones.append([InlineKeyboardButton(
+            f"{em} Pedido #{p['id']}  ·  {p['total']:.0f}€  ·  {fecha}",
+            callback_data=f"pedido_ver_{p['id']}"
+        )])
 
+    await update.message.reply_text(
+        f"📦 *Tus pedidos* ({min(len(pedidos), 10)} últimos)\n\nPulsa en uno para ver el detalle:",
+        parse_mode=ParseMode.MARKDOWN,
+        reply_markup=InlineKeyboardMarkup(botones),
+    )
+
+
+async def pedido_detalle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    await query.answer()
+    data = query.data
+    user_id = query.from_user.id
+
+    if data.startswith("pedido_ver_"):
+        pedido_id = int(data.split("_")[-1])
+        pedido = db.get_pedido(pedido_id)
+        if not pedido or pedido["usuario_tg"] != user_id:
+            await query.answer("Pedido no encontrado.", show_alert=True)
+            return
+
+        items = db.get_items_pedido(pedido_id)
+        estado = estado_emoji(pedido["estado"]) + " " + estado_texto(pedido["estado"])
+
+        items_txt = []
+        for it in items:
+            pers = ""
+            if it.get("personalizado"):
+                parches = " + parches" if it.get("tipo_personalizacion") == "nombre_numero_parches" else ""
+                pers = f"\n   ✏️ {it['nombre_dorsal']} #{it['numero_dorsal']}{parches}"
+            items_txt.append(f"• {it['nombre_producto']} · Talla {it['talla']} · {it['precio_unitario']:.0f}€{pers}")
+
+        # Timeline de estado
+        estados = ["pendiente_pago", "en_proceso", "enviado"]
+        timeline = ""
+        for i, est in enumerate(estados):
+            if est == pedido["estado"]:
+                timeline += f"▶️ *{estado_texto(est)}*\n"
+            elif estados.index(est) < estados.index(pedido["estado"]) if pedido["estado"] in estados else False:
+                timeline += f"✅ {estado_texto(est)}\n"
+            else:
+                timeline += f"⬜ {estado_texto(est)}\n"
+
+        texto = (
+            f"📦 *Pedido #{pedido_id}*\n"
+            f"Fecha: {str(pedido['created_at'])[:16]}\n\n"
+            f"📍 *Estado:*\n{timeline}\n"
+            f"🛍 *Productos:*\n" + "\n".join(items_txt) + "\n\n"
+            f"👤 {pedido['nombre_cliente']}\n"
+            f"📮 {pedido['direccion']}\n"
+            f"💰 Total: *{pedido['total']:.2f} €*\n"
+            f"💳 Ref: `{pedido['paypal_ref']}`"
+            + (f"\n📝 {pedido['notas']}" if pedido.get("notas") else "")
+        )
+
+        botones = []
+        if pedido["estado"] == "pendiente_pago":
+            botones.append([InlineKeyboardButton("❌ Solicitar cancelación", callback_data=f"pedido_cancelar_{pedido_id}")])
+        botones.append([InlineKeyboardButton("◀️ Volver", callback_data="pedido_volver")])
+
+        await query.edit_message_text(texto, parse_mode=ParseMode.MARKDOWN, reply_markup=InlineKeyboardMarkup(botones))
+
+    elif data.startswith("pedido_cancelar_"):
+        pedido_id = int(data.split("_")[-1])
+        pedido = db.get_pedido(pedido_id)
+        if not pedido or pedido["usuario_tg"] != user_id:
+            return
+        await query.edit_message_text(
+            f"❓ *¿Seguro que quieres cancelar el pedido #{pedido_id}?*\n\n"
+            f"Total: {pedido['total']:.2f} €",
+            parse_mode=ParseMode.MARKDOWN,
+            reply_markup=InlineKeyboardMarkup([
+                [InlineKeyboardButton("✅ Sí, cancelar", callback_data=f"pedido_confirmar_cancelar_{pedido_id}"),
+                 InlineKeyboardButton("◀️ No, volver", callback_data=f"pedido_ver_{pedido_id}")],
+            ]),
+        )
+
+    elif data.startswith("pedido_confirmar_cancelar_"):
+        pedido_id = int(data.split("_")[-1])
+        pedido = db.get_pedido(pedido_id)
+        if not pedido or pedido["usuario_tg"] != user_id:
+            return
+        db.actualizar_estado_pedido(pedido_id, "cancelado", "Cancelado por el cliente")
+        await query.edit_message_text(
+            f"✅ Solicitud de cancelación enviada para el pedido *#{pedido_id}*.\n\n"
+            f"Nos pondremos en contacto contigo si es necesario.",
+            parse_mode=ParseMode.MARKDOWN,
+        )
+        if ADMIN_CHAT_ID:
+            try:
+                await context.bot.send_message(
+                    chat_id=ADMIN_CHAT_ID,
+                    text=f"⚠️ *Cancelación solicitada*\n\nPedido *#{pedido_id}* cancelado por el cliente @{query.from_user.username or query.from_user.id}.",
+                    parse_mode=ParseMode.MARKDOWN,
+                )
+            except TelegramError:
+                pass
+
+    elif data == "pedido_volver":
+        pedidos = db.get_pedidos_usuario(user_id)
+        botones = []
+        for p in pedidos[:10]:
+            em = estado_emoji(p["estado"])
+            fecha = str(p["created_at"])[:10]
+            botones.append([InlineKeyboardButton(
+                f"{em} Pedido #{p['id']}  ·  {p['total']:.0f}€  ·  {fecha}",
+                callback_data=f"pedido_ver_{p['id']}"
+            )])
+        await query.edit_message_text(
+            f"📦 *Tus pedidos*\n\nPulsa en uno para ver el detalle:",
+            parse_mode=ParseMode.MARKDOWN,
+            reply_markup=InlineKeyboardMarkup(botones),
+        )
+
+
+# ── Notificación al admin ─────────────────────────────────────────────────────
+
+async def _notificar_admin(context, pedido_id, user, nombre_cliente, direccion, total, items, ref):
+    if not ADMIN_CHAT_ID:
+        return
+    username = f"@{user.username}" if user.username else f"ID:{user.id}"
     items_txt = []
     for it in items:
         pers = ""
         if it.get("personalizado"):
-            tipo = it.get("tipo_personalizacion", "")
-            parches_txt = " + parches" if tipo == "nombre_numero_parches" else ""
-            pers = f" ✏️ {it['nombre_dorsal']} #{it['numero_dorsal']}{parches_txt}"
-        # Añadir URL de Yupoo si existe
+            parches = " + parches" if it.get("tipo_personalizacion") == "nombre_numero_parches" else ""
+            pers = f" ✏️ {it['nombre_dorsal']} #{it['numero_dorsal']}{parches}"
         producto = db.get_producto_admin(it["producto_id"])
         yupoo = f"\n    🔗 {producto['yupoo_url']}" if producto and producto.get("yupoo_url") else ""
-        items_txt.append(
-            f"  • {it['nombre_producto']} T:{it['talla']} × {it['cantidad']} — {it['precio_unitario']:.2f}€{pers}{yupoo}"
-        )
+        items_txt.append(f"  • {it['nombre_producto']} T:{it['talla']} × {it['cantidad']} — {it['precio_unitario']:.0f}€{pers}{yupoo}")
 
     texto = (
         f"🛒 *NUEVO PEDIDO #{pedido_id}*\n\n"
-        f"👤 *Cliente:* {nombre_cliente}\n"
+        f"👤 *{nombre_cliente}*\n"
         f"   Telegram: {username} (ID: `{user.id}`)\n"
-        f"📍 *Dirección:* {direccion}\n\n"
+        f"📍 {direccion}\n\n"
         f"🛍 *Productos:*\n" + "\n".join(items_txt) + "\n\n"
         f"💰 *Total: {total:.2f} €*\n"
-        f"💳 *Ref pago:* `{paypal_ref}`\n\n"
+        f"💳 *Ref pago:* `{ref}`\n\n"
         f"⚠️ Verifica el pago antes de confirmar."
     )
-
-    teclado = InlineKeyboardMarkup([
-        [
-            InlineKeyboardButton("✅ Confirmar pago", callback_data=f"admin_confirmar_{pedido_id}"),
-            InlineKeyboardButton("❌ Rechazar", callback_data=f"admin_rechazar_{pedido_id}"),
-        ]
-    ])
-
+    teclado = InlineKeyboardMarkup([[
+        InlineKeyboardButton("✅ Confirmar pago", callback_data=f"admin_confirmar_{pedido_id}"),
+        InlineKeyboardButton("❌ Rechazar", callback_data=f"admin_rechazar_{pedido_id}"),
+    ]])
     try:
         await context.bot.send_message(
-            chat_id=ADMIN_CHAT_ID,
-            text=texto,
-            parse_mode=ParseMode.MARKDOWN,
-            reply_markup=teclado,
+            chat_id=ADMIN_CHAT_ID, text=texto,
+            parse_mode=ParseMode.MARKDOWN, reply_markup=teclado,
         )
     except TelegramError as e:
         logger.warning("No se pudo notificar al admin: %s", e)
 
 
-# ── Callbacks de admin (confirmar/rechazar desde notificación) ────────────────
+# ── Callbacks admin ───────────────────────────────────────────────────────────
 
 async def admin_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
-
     if query.message.chat.id != ADMIN_CHAT_ID:
         return
-
     data = query.data
+
     if data.startswith("admin_confirmar_"):
         pedido_id = int(data.split("_")[-1])
         pedido = db.get_pedido(pedido_id)
         if not pedido:
-            await query.edit_message_text(f"❌ Pedido #{pedido_id} no encontrado.")
             return
-
         db.actualizar_estado_pedido(pedido_id, "en_proceso")
-
-        # Editar el mensaje del admin
-        await query.edit_message_reply_markup(reply_markup=None)
+        await query.edit_message_reply_markup(reply_markup=InlineKeyboardMarkup([[
+            InlineKeyboardButton("🚚 Marcar enviado", callback_data=f"admin_enviado_{pedido_id}"),
+        ]]))
         await query.edit_message_text(
-            query.message.text + f"\n\n✅ *PAGO CONFIRMADO* por el admin.",
+            query.message.text + "\n\n✅ *PAGO CONFIRMADO*",
             parse_mode=ParseMode.MARKDOWN,
+            reply_markup=InlineKeyboardMarkup([[
+                InlineKeyboardButton("🚚 Marcar enviado", callback_data=f"admin_enviado_{pedido_id}"),
+            ]])
         )
-
-        # Notificar al cliente
         try:
             await context.bot.send_message(
                 chat_id=pedido["usuario_tg"],
                 text=(
                     f"✅ *¡Pago confirmado!*\n\n"
-                    f"Tu pedido *#{pedido_id}* está ahora en proceso.\n"
-                    f"Te avisaremos cuando sea enviado. ¡Gracias por tu compra! 🎉"
+                    f"Tu pedido *#{pedido_id}* está en proceso.\n"
+                    f"Te avisamos cuando lo enviemos. ¡Gracias por tu compra! 🎉"
                 ),
                 parse_mode=ParseMode.MARKDOWN,
             )
-        except TelegramError as e:
-            logger.warning("No se pudo notificar al cliente: %s", e)
+        except TelegramError:
+            pass
 
     elif data.startswith("admin_rechazar_"):
         pedido_id = int(data.split("_")[-1])
         pedido = db.get_pedido(pedido_id)
         if not pedido:
-            await query.edit_message_text(f"❌ Pedido #{pedido_id} no encontrado.")
             return
-
         db.actualizar_estado_pedido(pedido_id, "cancelado", "Pago no verificado")
-
-        await query.edit_message_reply_markup(reply_markup=None)
         await query.edit_message_text(
-            query.message.text + f"\n\n❌ *PEDIDO RECHAZADO* por el admin.",
+            query.message.text + "\n\n❌ *PEDIDO RECHAZADO*",
             parse_mode=ParseMode.MARKDOWN,
         )
-
         try:
             await context.bot.send_message(
                 chat_id=pedido["usuario_tg"],
                 text=(
                     f"❌ *No pudimos verificar tu pago para el pedido #{pedido_id}.*\n\n"
-                    f"Por favor revisa la referencia enviada o contacta con nosotros."
+                    f"Revisa la referencia enviada o contáctanos."
                 ),
                 parse_mode=ParseMode.MARKDOWN,
             )
-        except TelegramError as e:
-            logger.warning("No se pudo notificar al cliente: %s", e)
+        except TelegramError:
+            pass
+
+    elif data.startswith("admin_enviado_"):
+        pedido_id = int(data.split("_")[-1])
+        pedido = db.get_pedido(pedido_id)
+        if not pedido:
+            return
+        db.actualizar_estado_pedido(pedido_id, "enviado")
+        await query.edit_message_text(
+            query.message.text + "\n\n🚚 *MARCADO COMO ENVIADO*",
+            parse_mode=ParseMode.MARKDOWN,
+        )
+        try:
+            await context.bot.send_message(
+                chat_id=pedido["usuario_tg"],
+                text=f"🚚 *¡Tu pedido #{pedido_id} ha sido enviado!*\n\nEn breve llegará a tu dirección. ¡Gracias! 🎉",
+                parse_mode=ParseMode.MARKDOWN,
+            )
+        except TelegramError:
+            pass
 
 
-# ── Cancelar conversación ─────────────────────────────────────────────────────
+# ── Cancelar ──────────────────────────────────────────────────────────────────
 
 async def _cancelar_conversacion(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     chat_id = update.effective_chat.id
     limpiar_carrito(chat_id)
-    msg = "❌ Pedido cancelado. Usa *🛒 Nuevo pedido* cuando quieras volver a empezar."
+    msg = "❌ Pedido cancelado. Usa *🛍 Catálogo* para empezar de nuevo."
     if update.callback_query:
         await update.callback_query.edit_message_reply_markup(reply_markup=None)
         await context.bot.send_message(chat_id=chat_id, text=msg, parse_mode=ParseMode.MARKDOWN)
@@ -788,7 +990,7 @@ async def cmd_cancelar(update: Update, context: ContextTypes.DEFAULT_TYPE) -> in
     return await _cancelar_conversacion(update, context)
 
 
-# ── Comandos de admin (por texto) ─────────────────────────────────────────────
+# ── Admin comandos de texto ───────────────────────────────────────────────────
 
 def _es_admin(update: Update) -> bool:
     return update.effective_chat.id == ADMIN_CHAT_ID
@@ -796,60 +998,75 @@ def _es_admin(update: Update) -> bool:
 
 async def cmd_admin(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not _es_admin(update):
-        await update.message.reply_text("⛔ No tienes permisos de administrador.")
+        await update.message.reply_text("⛔ Sin permisos.")
         return
     pedidos = db.get_pedidos_pendientes()
     if not pedidos:
-        await update.message.reply_text("No hay pedidos pendientes de pago.")
+        await update.message.reply_text("No hay pedidos pendientes.")
         return
-    lines = [f"*Pedidos pendientes ({len(pedidos)}):*\n"]
+    lines = [f"*Pendientes ({len(pedidos)}):*\n"]
     for p in pedidos:
-        lines.append(
-            f"🔸 *#{p['id']}* — {p['nombre_cliente']} — {p['total']:.2f} €\n"
-            f"   Ref PayPal: `{p['paypal_ref']}` | {p['created_at'][:16]}"
-        )
+        lines.append(f"🔸 *#{p['id']}* — {p['nombre_cliente']} — {p['total']:.2f}€\n   Ref: `{p['paypal_ref']}` | {str(p['created_at'])[:16]}")
     await update.message.reply_text("\n".join(lines), parse_mode=ParseMode.MARKDOWN)
 
 
 async def cmd_pedido_admin(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Admin: ver detalle de cualquier pedido."""
     if not _es_admin(update):
         # Cliente: ver su propio pedido
-        await cmd_ver_pedido_cliente(update, context)
+        user_id = update.effective_user.id
+        args = context.args
+        if not args or not args[0].isdigit():
+            await update.message.reply_text("Uso: /pedido {número}")
+            return
+        pedido_id = int(args[0])
+        pedido = db.get_pedido(pedido_id)
+        if not pedido or pedido["usuario_tg"] != user_id:
+            await update.message.reply_text("❌ Pedido no encontrado.")
+            return
+        items = db.get_items_pedido(pedido_id)
+        estado = estado_emoji(pedido["estado"]) + " " + estado_texto(pedido["estado"])
+        items_txt = [f"• {it['nombre_producto']} T:{it['talla']} {it['precio_unitario']:.0f}€" for it in items]
+        await update.message.reply_text(
+            f"📦 *Pedido #{pedido_id}*\nEstado: {estado}\nTotal: {pedido['total']:.2f}€\n\n" + "\n".join(items_txt),
+            parse_mode=ParseMode.MARKDOWN,
+        )
         return
 
     args = context.args
     if not args or not args[0].isdigit():
         await update.message.reply_text("Uso: /pedido {id}")
         return
-
     pedido_id = int(args[0])
     pedido = db.get_pedido(pedido_id)
     if not pedido:
         await update.message.reply_text(f"❌ Pedido #{pedido_id} no encontrado.")
         return
-
     items = db.get_items_pedido(pedido_id)
-    teclado = InlineKeyboardMarkup([
-        [
-            InlineKeyboardButton("✅ Confirmar pago", callback_data=f"admin_confirmar_{pedido_id}"),
+    items_txt = [f"• {it['nombre_producto']} T:{it['talla']} × {it['cantidad']} — {it['precio_unitario']:.0f}€" for it in items]
+    teclado = None
+    if pedido["estado"] in ("pendiente_pago", "en_proceso"):
+        teclado = InlineKeyboardMarkup([[
+            InlineKeyboardButton("✅ Confirmar", callback_data=f"admin_confirmar_{pedido_id}"),
             InlineKeyboardButton("❌ Rechazar", callback_data=f"admin_rechazar_{pedido_id}"),
-        ],
-        [InlineKeyboardButton("🚚 Marcar enviado", callback_data=f"admin_enviado_{pedido_id}")],
-    ]) if pedido["estado"] in ("pendiente_pago", "en_proceso") else None
-
+            InlineKeyboardButton("🚚 Enviado", callback_data=f"admin_enviado_{pedido_id}"),
+        ]])
     await update.message.reply_text(
-        formato_pedido_completo(pedido, items)
-        + f"\n\n👤 TG: @{pedido['username_tg'] or '—'} (ID: `{pedido['usuario_tg']}`)",
+        f"📦 *Pedido #{pedido_id}*\n"
+        f"Estado: {estado_emoji(pedido['estado'])} {estado_texto(pedido['estado'])}\n"
+        f"Cliente: {pedido['nombre_cliente']}\n"
+        f"TG: @{pedido['username_tg'] or '—'} (`{pedido['usuario_tg']}`)\n"
+        f"Dirección: {pedido['direccion']}\n"
+        f"Total: *{pedido['total']:.2f}€*\n"
+        f"Ref: `{pedido['paypal_ref']}`\n"
+        f"Fecha: {str(pedido['created_at'])[:16]}\n\n"
+        + "\n".join(items_txt),
         parse_mode=ParseMode.MARKDOWN,
         reply_markup=teclado,
     )
 
 
 async def cmd_confirmar(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if not _es_admin(update):
-        await update.message.reply_text("⛔ No tienes permisos.")
-        return
+    if not _es_admin(update): return
     args = context.args
     if not args or not args[0].isdigit():
         await update.message.reply_text("Uso: /confirmar {id}")
@@ -860,21 +1077,16 @@ async def cmd_confirmar(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text(f"❌ Pedido #{pedido_id} no encontrado.")
         return
     db.actualizar_estado_pedido(pedido_id, "en_proceso")
-    await update.message.reply_text(f"✅ Pedido #{pedido_id} confirmado.", parse_mode=ParseMode.MARKDOWN)
+    await update.message.reply_text(f"✅ Pedido #{pedido_id} confirmado.")
     try:
-        await context.bot.send_message(
-            chat_id=pedido["usuario_tg"],
+        await context.bot.send_message(chat_id=pedido["usuario_tg"],
             text=f"✅ *¡Pago confirmado!*\n\nTu pedido *#{pedido_id}* está en proceso. ¡Gracias! 🎉",
-            parse_mode=ParseMode.MARKDOWN,
-        )
-    except TelegramError:
-        pass
+            parse_mode=ParseMode.MARKDOWN)
+    except TelegramError: pass
 
 
 async def cmd_enviado(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if not _es_admin(update):
-        await update.message.reply_text("⛔ No tienes permisos.")
-        return
+    if not _es_admin(update): return
     args = context.args
     if not args or not args[0].isdigit():
         await update.message.reply_text("Uso: /enviado {id} [tracking]")
@@ -886,26 +1098,17 @@ async def cmd_enviado(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text(f"❌ Pedido #{pedido_id} no encontrado.")
         return
     db.actualizar_estado_pedido(pedido_id, "enviado", f"Tracking: {tracking}" if tracking else "")
-    await update.message.reply_text(
-        f"🚚 Pedido #{pedido_id} marcado como enviado."
-        + (f"\nTracking: `{tracking}`" if tracking else ""),
-        parse_mode=ParseMode.MARKDOWN,
-    )
+    await update.message.reply_text(f"🚚 Pedido #{pedido_id} enviado." + (f"\nTracking: `{tracking}`" if tracking else ""), parse_mode=ParseMode.MARKDOWN)
     tracking_msg = f"\n📍 Seguimiento: `{tracking}`" if tracking else ""
     try:
-        await context.bot.send_message(
-            chat_id=pedido["usuario_tg"],
+        await context.bot.send_message(chat_id=pedido["usuario_tg"],
             text=f"🚚 *¡Tu pedido #{pedido_id} ha sido enviado!*{tracking_msg}\n\n¡Gracias por tu compra! 🎉",
-            parse_mode=ParseMode.MARKDOWN,
-        )
-    except TelegramError:
-        pass
+            parse_mode=ParseMode.MARKDOWN)
+    except TelegramError: pass
 
 
-async def cmd_cancelar_pedido_admin(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if not _es_admin(update):
-        await update.message.reply_text("⛔ No tienes permisos.")
-        return
+async def cmd_cancelar_admin(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not _es_admin(update): return
     args = context.args
     if not args or not args[0].isdigit():
         await update.message.reply_text("Uso: /cancelar {id} [motivo]")
@@ -917,29 +1120,26 @@ async def cmd_cancelar_pedido_admin(update: Update, context: ContextTypes.DEFAUL
         await update.message.reply_text(f"❌ Pedido #{pedido_id} no encontrado.")
         return
     db.actualizar_estado_pedido(pedido_id, "cancelado", motivo)
-    await update.message.reply_text(f"❌ Pedido #{pedido_id} cancelado.", parse_mode=ParseMode.MARKDOWN)
+    await update.message.reply_text(f"❌ Pedido #{pedido_id} cancelado.")
     try:
-        await context.bot.send_message(
-            chat_id=pedido["usuario_tg"],
-            text=f"❌ *Tu pedido #{pedido_id} ha sido cancelado.*\n\n{motivo}",
-            parse_mode=ParseMode.MARKDOWN,
-        )
-    except TelegramError:
-        pass
+        await context.bot.send_message(chat_id=pedido["usuario_tg"],
+            text=f"❌ *Tu pedido #{pedido_id} ha sido cancelado.*\n\n{motivo}", parse_mode=ParseMode.MARKDOWN)
+    except TelegramError: pass
 
 
 # ── Ayuda ─────────────────────────────────────────────────────────────────────
 
 async def cmd_ayuda(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(
-        "*Menú de la tienda:*\n\n"
-        "🛒 *Nuevo pedido* — Iniciar un pedido\n"
-        "🛍 *Mi carrito* — Ver tu carrito actual\n"
-        "📦 *Mis pedidos* — Ver historial de pedidos\n\n"
-        "*Comandos:*\n"
-        "/pedido {nº} — Ver detalle de un pedido\n"
-        "/cancelar — Cancelar el pedido en curso\n\n"
-        "_Para pedir, pulsa 🛒 Nuevo pedido o visita el catálogo._",
+        f"*{STORE_NAME}* — Ayuda\n\n"
+        f"🛍 *Catálogo* — Navega y elige productos\n"
+        f"🛒 *Mi carrito* — Ver y gestionar el carrito\n"
+        f"📦 *Mis pedidos* — Historial y estado de pedidos\n\n"
+        f"*Comandos:*\n"
+        f"/pedido {{nº}} — Ver detalle de un pedido\n"
+        f"/cancelar — Cancelar el pedido en curso\n\n"
+        f"💶 Precios desde *{PRECIO_BASE:.0f}€* · Envío a toda España\n"
+        f"💳 Pago por PayPal" + (f" o Bizum" if BIZUM_NUMERO else ""),
         parse_mode=ParseMode.MARKDOWN,
         reply_markup=MENU_KEYBOARD,
     )
@@ -947,7 +1147,7 @@ async def cmd_ayuda(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def mensaje_inesperado(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(
-        "⚠️ Sigue las instrucciones o usa /cancelar para empezar de nuevo."
+        "⚠️ Sigue las instrucciones anteriores o usa /cancelar para empezar de nuevo."
     )
 
 
@@ -957,12 +1157,11 @@ def main():
     db.init_db()
     db.seed_demo_if_empty()
 
-    app = Application.builder().token(BOT_TOKEN).build()
+    application = Application.builder().token(BOT_TOKEN).build()
 
-    conv_handler = ConversationHandler(
+    conv = ConversationHandler(
         entry_points=[
             CommandHandler("start", cmd_start),
-            MessageHandler(filters.Regex("^🛒 Nuevo pedido$"), menu_nuevo_pedido),
         ],
         states={
             ESPERANDO_PRODUCTO_ID: [
@@ -975,10 +1174,7 @@ def main():
                 CallbackQueryHandler(elegir_talla, pattern="^(talla_|cancelar_pedido)"),
             ],
             ESPERANDO_PERSONALIZACION: [
-                CallbackQueryHandler(
-                    elegir_personalizacion,
-                    pattern="^(pers_sin|pers_nombre_numero|pers_con_parches|cancelar_pedido)$"
-                ),
+                CallbackQueryHandler(elegir_personalizacion, pattern="^(pers_sin|pers_nombre_numero|pers_con_parches|cancelar_pedido)$"),
             ],
             ESPERANDO_NOMBRE_DORSAL: [
                 MessageHandler(filters.TEXT & ~filters.COMMAND, recibir_nombre_dorsal),
@@ -992,43 +1188,45 @@ def main():
             ESPERANDO_DATOS_ENVIO: [
                 MessageHandler(filters.TEXT & ~filters.COMMAND, recibir_datos_envio),
             ],
-            ESPERANDO_REFERENCIA_PAYPAL: [
-                MessageHandler(filters.TEXT & ~filters.COMMAND, recibir_referencia_paypal),
+            ESPERANDO_REFERENCIA_PAGO: [
+                MessageHandler(filters.TEXT & ~filters.COMMAND, recibir_referencia_pago),
             ],
         },
         fallbacks=[
             CommandHandler("cancelar", cmd_cancelar),
-            MessageHandler(filters.Regex("^(📦 Mis pedidos|🛍 Mi carrito|❓ Ayuda)$"), mensaje_inesperado),
             MessageHandler(filters.COMMAND, mensaje_inesperado),
             MessageHandler(filters.TEXT, mensaje_inesperado),
         ],
         allow_reentry=True,
     )
 
-    app.add_handler(conv_handler)
+    application.add_handler(conv)
 
-    # Menú fuera de conversación
-    app.add_handler(MessageHandler(filters.Regex("^📦 Mis pedidos$"), menu_mis_pedidos))
-    app.add_handler(MessageHandler(filters.Regex("^🛍 Mi carrito$"), menu_mi_carrito))
-    app.add_handler(MessageHandler(filters.Regex("^❓ Ayuda$"), cmd_ayuda))
+    # Menú botones
+    application.add_handler(MessageHandler(filters.Regex("^🛍 Catálogo$"), menu_catalogo))
+    application.add_handler(MessageHandler(filters.Regex("^🛒 Mi carrito$"), menu_carrito))
+    application.add_handler(MessageHandler(filters.Regex("^📦 Mis pedidos$"), menu_mis_pedidos))
+    application.add_handler(MessageHandler(filters.Regex("^❓ Ayuda$"), cmd_ayuda))
+
+    # Callbacks inline
+    application.add_handler(CallbackQueryHandler(catalogo_callback, pattern="^cat_"))
+    application.add_handler(CallbackQueryHandler(carrito_callback, pattern="^carrito_"))
+    application.add_handler(CallbackQueryHandler(pedido_detalle_callback, pattern="^pedido_"))
+    application.add_handler(CallbackQueryHandler(confirmar_producto, pattern="^(confirmar_producto|cancelar_pedido)$"))
+    application.add_handler(CallbackQueryHandler(admin_callback, pattern="^admin_"))
 
     # Comandos
-    app.add_handler(CommandHandler("mispedidos", menu_mis_pedidos))
-    app.add_handler(CommandHandler("pedido", cmd_pedido_admin))
-    app.add_handler(CommandHandler("ayuda", cmd_ayuda))
-    app.add_handler(CommandHandler("help", cmd_ayuda))
-
-    # Admin
-    app.add_handler(CommandHandler("admin", cmd_admin))
-    app.add_handler(CommandHandler("confirmar", cmd_confirmar))
-    app.add_handler(CommandHandler("enviado", cmd_enviado))
-    app.add_handler(CommandHandler("cancelar", cmd_cancelar_pedido_admin))
-
-    # Callbacks de botones inline del admin
-    app.add_handler(CallbackQueryHandler(admin_callback, pattern="^admin_(confirmar|rechazar|enviado)_"))
+    application.add_handler(CommandHandler("mispedidos", menu_mis_pedidos))
+    application.add_handler(CommandHandler("pedido", cmd_pedido_admin))
+    application.add_handler(CommandHandler("ayuda", cmd_ayuda))
+    application.add_handler(CommandHandler("help", cmd_ayuda))
+    application.add_handler(CommandHandler("admin", cmd_admin))
+    application.add_handler(CommandHandler("confirmar", cmd_confirmar))
+    application.add_handler(CommandHandler("enviado", cmd_enviado))
+    application.add_handler(CommandHandler("cancelar", cmd_cancelar_admin))
 
     logger.info("Bot iniciado.")
-    app.run_polling(allowed_updates=Update.ALL_TYPES)
+    application.run_polling(allowed_updates=Update.ALL_TYPES)
 
 
 if __name__ == "__main__":
