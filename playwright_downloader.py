@@ -72,7 +72,7 @@ class YupooPlaywright:
     # -------------------------------------------------------- page navigation
 
     async def get_page_count(self, page: Page, url: str) -> int:
-        await page.goto(url, wait_until="domcontentloaded")
+        await page.goto(url, wait_until="domcontentloaded", timeout=20000)
         await human_delay()
         inp = await page.query_selector('form.pagination__jumpwrap input[name="page"]')
         if inp:
@@ -95,7 +95,7 @@ class YupooPlaywright:
         if self.covers_only:
             page.on("response", capture_response)
 
-        await page.goto(url, wait_until="domcontentloaded")
+        await page.goto(url, wait_until="domcontentloaded", timeout=20000)
         await human_delay()
 
         anchors = await page.query_selector_all("a.album__main")
@@ -184,12 +184,17 @@ class YupooPlaywright:
                     pass
 
         page.on("response", capture_response)
-        await page.goto(album["url"], wait_until="domcontentloaded")
+        try:
+            await page.goto(album["url"], wait_until="domcontentloaded", timeout=20000)
+        except Exception as e:
+            log.warning(f"  Timeout cargando álbum, continuando: {e}")
+            page.remove_listener("response", capture_response)
+            return
         await human_delay(0.5, 1)
 
-        # scroll progresivo para forzar lazy loading de todas las imágenes
+        # scroll progresivo para forzar lazy loading, máximo 30 iteraciones
         prev_height = 0
-        while True:
+        for _ in range(30):
             await page.evaluate("window.scrollBy(0, 600)")
             await asyncio.sleep(0.3)
             height = await page.evaluate("document.body.scrollHeight")
@@ -280,7 +285,7 @@ class YupooPlaywright:
                     if re.search(r'/(categories|collections)/', url):
                         albums.extend(await self.get_albums_from_category(page, url))
                     elif re.search(r'/albums/\d+', url):
-                        await page.goto(url, wait_until="domcontentloaded")
+                        await page.goto(url, wait_until="domcontentloaded", timeout=20000)
                         await human_delay()
                         t = await page.query_selector("span.showalbumheader__gallerytitle")
                         title = (await t.inner_text()).strip() if t else "album"
