@@ -11,7 +11,7 @@ DATABASE_URL = os.environ.get("DATABASE_URL", "")
 
 # Parámetros de conexión por defecto (pooler Supabase, compatible con IPv4)
 _DB_PARAMS = {
-    "host": os.environ.get("PGHOST", "aws-0-eu-west-3.pooler.supabase.com"),
+    "host": os.environ.get("PGHOST", "aws-0-eu-west-1.pooler.supabase.com"),
     "options": "-c search_path=public",
     "port": int(os.environ.get("PGPORT", "5432")),
     "dbname": os.environ.get("PGDATABASE", "postgres"),
