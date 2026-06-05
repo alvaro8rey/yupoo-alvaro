@@ -675,6 +675,31 @@ def foto_eliminar(foto_id: int):
     return redirect(url_for("producto_fotos", producto_id=producto_id))
 
 
+# ── API pública ──────────────────────────────────────────────────────────────
+
+@app.route("/api/productos")
+def api_productos():
+    productos = db.get_todos_productos(solo_activos=True)
+    base = request.host_url.rstrip("/")
+    result = []
+    for p in productos:
+        fotos = db.get_fotos_producto(p["id"])
+        p_out = dict(p)
+        p_out["tallas"] = json.loads(p.get("tallas") or "[]")
+        # Portada primero, luego el resto — URLs directas para el frontend
+        fotos_ordenadas = sorted(fotos, key=lambda f: (0 if f["es_portada"] else 1))
+        p_out["fotos"] = [f"{base}/foto/{f['id']}" for f in fotos_ordenadas]
+        p_out["portada_url"] = p_out["fotos"][0] if p_out["fotos"] else ""
+        result.append(p_out)
+
+    response = app.response_class(
+        response=json.dumps(result, ensure_ascii=False),
+        mimetype="application/json"
+    )
+    response.headers["Access-Control-Allow-Origin"] = "*"
+    return response
+
+
 # ── Init & run ────────────────────────────────────────────────────────────────
 
 if __name__ == "__main__":

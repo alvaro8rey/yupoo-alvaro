@@ -4,8 +4,9 @@ import ProductGrid from './components/ProductGrid.jsx';
 import ProductDetail from './components/ProductDetail.jsx';
 
 // ── Config ────────────────────────────────────────────────────────────────────
-const BOT_USERNAME = "camisetasgalbot"; // ← change this
+const BOT_USERNAME = "camisetasgalbot";
 const STORE_NAME = "Camisetas Premium";
+const API_URL = "https://yupoo-tienda.onrender.com/api/productos";
 // ─────────────────────────────────────────────────────────────────────────────
 
 export default function App() {
@@ -22,7 +23,7 @@ export default function App() {
 
   // Load data
   useEffect(() => {
-    fetch('/data.json')
+    fetch(API_URL)
       .then(r => {
         if (!r.ok) throw new Error(`HTTP ${r.status}`);
         return r.json();

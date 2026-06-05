@@ -3,7 +3,7 @@ import React, { useState } from 'react';
 export default function ProductCard({ product, onClick }) {
   const [imgError, setImgError] = useState(false);
 
-  const coverPhoto = product.fotos?.[0] || product.foto_path || '';
+  const coverPhoto = product.portada_url || product.fotos?.[0] || product.foto_path || '';
   const hasImage = coverPhoto && !imgError;
 
   return (
