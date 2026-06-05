@@ -80,8 +80,24 @@ class YupooPlaywright:
         return 1
 
     async def scrape_albums_from_page(self, page: Page, url: str) -> list[dict]:
+        captured_covers: dict[str, bytes] = {}
+
+        async def capture_response(response):
+            r_url = response.url
+            if "photo.yupoo.com" in r_url:
+                try:
+                    body = await response.body()
+                    if body:
+                        captured_covers[r_url] = body
+                except Exception:
+                    pass
+
+        if self.covers_only:
+            page.on("response", capture_response)
+
         await page.goto(url, wait_until="domcontentloaded")
         await human_delay()
+
         anchors = await page.query_selector_all("a.album__main")
         albums = []
         for a in anchors:
@@ -93,7 +109,22 @@ class YupooPlaywright:
             else:
                 album_url = f"https://{self.catalog_name}.x.yupoo.com{href}"
             album_url = re.sub(r'\?.*$', '', album_url) + "?uid=1"
-            albums.append({"title": title, "url": album_url})
+
+            cover_bytes = None
+            if self.covers_only:
+                # la portada es la imagen dentro del enlace del álbum
+                img = await a.query_selector("img")
+                if img:
+                    src = await img.get_attribute("src") or ""
+                    if src:
+                        full_src = "https:" + src if src.startswith("//") else src
+                        cover_bytes = captured_covers.get(full_src)
+
+            albums.append({"title": title, "url": album_url, "cover": cover_bytes})
+
+        if self.covers_only:
+            page.remove_listener("response", capture_response)
+
         return albums
 
     async def get_all_albums(self, page: Page) -> list[dict]:
@@ -132,6 +163,13 @@ class YupooPlaywright:
 
         log.info(f"  Álbum: {title_raw!r} -> {folder!r}")
         album_dir.mkdir(parents=True, exist_ok=True)
+
+        # si la portada ya fue capturada en la página de listado, guardarla directamente
+        if self.covers_only and album.get("cover"):
+            path = album_dir / "portada.jpg"
+            await self.save_image(album["cover"], path)
+            log.info(f"    portada guardada: {path.name}")
+            return
 
         captured: dict[str, bytes] = {}
 
