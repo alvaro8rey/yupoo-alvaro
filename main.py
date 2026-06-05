@@ -35,6 +35,7 @@ else:
 	from PIL import Image as Image
 	from io import BytesIO
 	from copy import deepcopy
+	from deep_translator import GoogleTranslator
 
 	import ssl
 	import certifi
@@ -158,7 +159,7 @@ else:
 							for catalog in self.albums:
 								for album in self.albums[catalog]:
 									self.tasks.append(asyncio.ensure_future(self.async_req(self.albums[catalog][album]['album_link'], self.get_album)))
-					
+
 					urls = []
 					for url in self.urls:
 						if 'categories' not in url and 'collections' not in url:
@@ -189,9 +190,9 @@ else:
 						with alive_bar(len(self.tasks), length=35, bar="squares", spinner="classic", elapsed="em {elapsed}") as self.bar:
 							await self._(self.tasks, self.get_album)
 					logger.info(self.now())
-				
+
 				#downloading imgs in albums
-				self.tasks=[]	
+				self.tasks=[]
 				self.start_time = perf_counter()
 				if self.all_albums:
 					for catalog in self.albums:
@@ -223,7 +224,7 @@ else:
 													shortcut.Targetpath = target
 													shortcut.WorkingDirectory = work_dir
 													shortcut.save()
-													
+
 											continue
 										self.tasks.append(asyncio.ensure_future(self.async_req(img_link, self.get_imgs)))
 					if len(self.tasks) > 0:
@@ -263,7 +264,7 @@ else:
 													shortcut.Targetpath = target
 													shortcut.WorkingDirectory = work_dir
 													shortcut.save()
-													
+
 											continue
 										self.tasks.append(asyncio.ensure_future(self.async_req(img_link, self.get_imgs)))
 						self.start_time = perf_counter()
@@ -273,7 +274,7 @@ else:
 							with alive_bar(len(self.tasks), length=35, bar="squares", spinner="classic", elapsed="em {elapsed}") as self.bar:
 								await self._(self.tasks, self.get_imgs)
 						logger.info(self.now())
-								
+
 				logger.info(f"finish: {round(perf_counter() - self.start_time_class, 2)}")
 
 		async def async_req(self, url, function = None, category = None):
@@ -304,7 +305,7 @@ else:
 					errors[0] = 0
 
 
-			
+
 			async with self.sem:
 				async def req():
 					self.connect_control[0] +=1
@@ -373,7 +374,7 @@ else:
 					url = f"{url_}?page=1"
 					if "?" in url_:
 						url = f"{url_}&page=1"
-				
+
 				timeout = aiohttp.ClientTimeout(total=15)
 				session = aiohttp.ClientSession()
 				async with session:
@@ -385,7 +386,7 @@ else:
 									logging.info('pages 200')
 									text = await resp.text()
 									soup = BeautifulSoup(text.encode("ascii", "ignore").decode("utf-8"), "lxml")
-									if soup.select_one('div.empty_emptymain') == None:				
+									if soup.select_one('div.empty_emptymain') == None:
 										try:
 											total_pages = soup.select_one('form.pagination__jumpwrap input[name="page"]').get('max')
 										except:
@@ -433,7 +434,7 @@ else:
 			if self.all_albums:
 				if name_catalog not in self.albums:
 					self.albums[name_catalog] = {}
-				
+
 			base_url = re.findall(r'(?<=https:\/\/)(.*?)(?=\.com)', page[2])[0]
 			for album in soup.find_all("a", {"class": "album__main"}):
 				href = album.get('href')
@@ -521,7 +522,7 @@ else:
 			path = f"{OUTPUT_PATH}/fotos_yupoo/{name_catalog}/albuns/{album}"
 			if os.path.exists(path) == False:
 				os.makedirs(path)
-			
+
 			if "category_title" in album_path:
 				save_path = self.normpath(f"{OUTPUT_PATH}/fotos_yupoo/{name_catalog}/categorias/{album_path['category_title']}/")
 				target = self.normpath(path)  # The shortcut target file or folder
@@ -616,6 +617,14 @@ else:
 
 
 		async def parse_title(self, title, catalog, category = False):
+			# traducción automática al español antes de limpiar el nombre
+			try:
+				translated = GoogleTranslator(source='auto', target='es').translate(title)
+				if translated:
+					title = translated
+			except Exception:
+				pass
+
 			title = title.replace('.', '_').replace('/', '_').replace(':', '').replace('"', '').replace("'", '').replace('*','')
 			title = title.strip()
 			it = 0
