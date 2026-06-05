@@ -26,10 +26,21 @@ import aiofiles
 from PIL import Image, ImageFile
 from playwright.async_api import async_playwright, Page
 from deep_translator import GoogleTranslator
+from rich.console import Console
+from rich.panel import Panel
+from rich.prompt import Prompt, Confirm
+from rich.progress import Progress, SpinnerColumn, TextColumn, BarColumn, TaskProgressColumn, TimeElapsedColumn
+from rich import print as rprint
 
 ImageFile.LOAD_TRUNCATED_IMAGES = True
-logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
+logging.basicConfig(level=logging.WARNING, format="%(asctime)s %(levelname)s %(message)s")
 log = logging.getLogger("yupoo")
+
+console = Console()
+PURPLE  = "#6149ab"
+LPURPLE = "#baa6ff"
+GREEN   = "#0ba162"
+RED     = "#c7383f"
 
 
 # ------------------------------------------------------------------ helpers
@@ -364,46 +375,109 @@ class YupooPlaywright:
                 await browser.close()
                 return
 
-            for i, album in enumerate(albums, 1):
-                log.info(f"[{i}/{len(albums)}]")
-                await self.download_album(page, album)
-                await human_delay(0.3, 0.8)
+            with Progress(
+                SpinnerColumn(),
+                TextColumn("[progress.description]{task.description}"),
+                BarColumn(),
+                TaskProgressColumn(),
+                TimeElapsedColumn(),
+                console=console,
+                transient=False,
+            ) as progress:
+                task = progress.add_task(f"[{LPURPLE}]Descargando álbums...[/]", total=len(albums))
+                for album in albums:
+                    title_es = translate(album["title"]) if self.translate else album["title"]
+                    progress.update(task, description=f"[{LPURPLE}]{sanitize(title_es)[:40]}[/]")
+                    await self.download_album(page, album)
+                    progress.advance(task)
+                    await human_delay(0.3, 0.8)
 
             await browser.close()
-        log.info(f"Hecho. Imágenes en: {self.output / self.catalog_name}")
+        console.print(f"\n[b {GREEN}]✓ Descarga completa.[/] Imágenes en: [b]{self.output / self.catalog_name}[/]")
 
 
 # ------------------------------------------------------------------ CLI
 
+
+
+def pedir_url() -> str:
+    while True:
+        console.print(f"\n[{LPURPLE}]URL del catálogo Yupoo[/]")
+        console.print(f"[dim]ej: https://nombre.x.yupoo.com[/]")
+        url = Prompt.ask(f"[{PURPLE}]>[/]").strip()
+        if url.startswith("http") and "yupoo.com" in url:
+            return url
+        console.print(f"[{RED}]URL no válida, inténtalo de nuevo[/]")
+
+
+def pedir_opcion() -> str:
+    while True:
+        console.print(f"\n[b {PURPLE}]¿Qué quieres descargar?[/]")
+        console.print(f"  [{LPURPLE}]1.[/] Toda la colección  —  todas las fotos  [{RED}](pesado)[/]")
+        console.print(f"  [{LPURPLE}]2.[/] Toda la colección  —  solo portadas")
+        console.print(f"  [{LPURPLE}]3.[/] Álbums o categorías concretas  —  todas las fotos")
+        console.print(f"  [{LPURPLE}]4.[/] Álbums o categorías concretas  —  solo portadas")
+        console.print(f"  [{LPURPLE}]0.[/] [{RED}]Volver[/]")
+        op = Prompt.ask(f"[{PURPLE}]Opción[/]", choices=["0","1","2","3","4"]).strip()
+        return op
+
+
+def pedir_urls_especificas() -> list[str] | None:
+    console.print(f"\n[{LPURPLE}]Pega las URLs una por una.[/]")
+    console.print(f"[dim]Escribe [b]ok[/b] para continuar o [b]0[/b] para volver[/]")
+    urls = []
+    while True:
+        u = Prompt.ask(f"  [{PURPLE}]URL[/]").strip()
+        if u.lower() == "0":
+            return None
+        if u.lower() == "ok":
+            if urls:
+                return urls
+            console.print(f"[{RED}]Añade al menos una URL[/]")
+        elif u.startswith("http"):
+            urls.append(u)
+            console.print(f"  [{GREEN}]✓[/] {u}")
+        else:
+            console.print(f"  [{RED}]URL no válida[/]")
+
+
+def pedir_carpeta() -> str:
+    default = "./fotos_yupoo"
+    console.print(f"\n[{LPURPLE}]Carpeta de destino[/] [dim](Enter para usar {default})[/]")
+    carpeta = Prompt.ask(f"[{PURPLE}]>[/]", default=default).strip()
+    return carpeta or default
+
+
 def menu_interactivo():
-    print("\n===== YUPOO DOWNLOADER (Playwright) =====")
-    base_url = input("URL del catálogo (ej: https://nombre.x.yupoo.com): ").strip()
-    print()
-    print("¿Qué quieres descargar?")
-    print("  1. Toda la colección — todas las fotos")
-    print("  2. Toda la colección — solo portadas")
-    print("  3. Álbums o categorías concretas — todas las fotos")
-    print("  4. Álbums o categorías concretas — solo portadas")
-    opcion = input("Opción (1-4): ").strip()
+    console.print(Panel(
+        f"[b {GREEN}]YUPOO DOWNLOADER[/]",
+        subtitle=f"[dim]Descargador de imágenes Yupoo[/]",
+        border_style=PURPLE,
+        padding=(0, 4),
+    ))
 
-    specific_urls = None
-    covers_only = opcion in ("2", "4")
+    base_url = pedir_url()
 
-    if opcion in ("3", "4"):
-        print("Pega las URLs una por una. Escribe 'ok' cuando termines:")
-        specific_urls = []
-        while True:
-            u = input("  URL: ").strip()
-            if u.lower() == "ok":
-                break
-            if u:
-                specific_urls.append(u)
+    while True:
+        opcion = pedir_opcion()
+        if opcion == "0":
+            base_url = pedir_url()
+            continue
 
-    carpeta = input("\nCarpeta de destino [./fotos_yupoo]: ").strip() or "./fotos_yupoo"
-    sin_trad = input("¿Desactivar traducción al español? (s/N): ").strip().lower() == "s"
-    visible = input("¿Mostrar navegador? (s/N): ").strip().lower() == "s"
+        specific_urls = None
+        covers_only = opcion in ("2", "4")
 
-    return base_url, specific_urls, covers_only, sin_trad, carpeta, not visible
+        if opcion in ("3", "4"):
+            specific_urls = pedir_urls_especificas()
+            if specific_urls is None:
+                continue  # volver al menú de opciones
+
+        carpeta = pedir_carpeta()
+        sin_trad = not Confirm.ask(f"\n[{LPURPLE}]¿Traducir nombres al español?[/]", default=True)
+        visible  = Confirm.ask(f"[{LPURPLE}]¿Mostrar navegador?[/]", default=False)
+
+        console.print(f"\n[b {GREEN}]Iniciando descarga...[/]\n")
+        return base_url, specific_urls, covers_only, sin_trad, carpeta, not visible
 
 
 def main():
