@@ -245,32 +245,18 @@ class YupooPlaywright:
                     pass
             return
 
-        captured: dict[str, bytes] = {}
-
-        async def capture_response(response):
-            url = response.url
-            if "photo.yupoo.com" in url and url.endswith((".jpeg", ".jpg", ".png", ".webp")):
-                try:
-                    body = await response.body()
-                    if body:
-                        captured[url] = body
-                except Exception:
-                    pass
-
-        page.on("response", capture_response)
         try:
             await page.goto(album["url"], wait_until="domcontentloaded", timeout=20000)
         except Exception as e:
             log.warning(f"  Timeout cargando álbum, continuando: {e}")
-            page.remove_listener("response", capture_response)
             return
         await human_delay(0.2, 0.5)
 
-        # scroll progresivo para forzar lazy loading, máximo 30 iteraciones
+        # scroll para forzar que el DOM cargue todos los elementos lazy
         prev_height = 0
         for _ in range(30):
             await page.evaluate("window.scrollBy(0, 800)")
-            await asyncio.sleep(0.15)
+            await asyncio.sleep(0.2)
             height = await page.evaluate("document.body.scrollHeight")
             scroll_y = await page.evaluate("window.scrollY + window.innerHeight")
             if scroll_y >= height and height == prev_height:
@@ -278,13 +264,13 @@ class YupooPlaywright:
             prev_height = height
         await asyncio.sleep(0.5)
 
-        # obtener lista de URLs en orden desde el DOM
+        # obtener URLs originales del DOM (data-origin-src = alta resolución)
         if self.covers_only:
             cover = await page.query_selector(".showalbumheader__gallerycover img")
             src = await cover.get_attribute("src") if cover else ""
-            ordered_urls = ["https:" + src] if src and src.startswith("//") else ([src] if src else [])
+            img_urls = ["https:" + src] if src and src.startswith("//") else ([src] if src else [])
         else:
-            ordered_urls = []
+            img_urls = []
             divs = await page.query_selector_all("div.showalbum__children")
             for div in divs:
                 wrap = await div.query_selector(".image__imagewrap")
@@ -295,30 +281,42 @@ class YupooPlaywright:
                     continue
                 src = await img.get_attribute("data-origin-src") or await img.get_attribute("src") or ""
                 if src:
-                    ordered_urls.append("https:" + src if src.startswith("//") else src)
+                    img_urls.append("https:" + src if src.startswith("//") else src)
 
-        # esperar a que se capturen las imágenes visibles
-        await asyncio.sleep(1)
-        page.remove_listener("response", capture_response)
-
-        if not captured:
-            log.warning(f"  Sin imágenes capturadas: {title_raw!r}")
+        if not img_urls:
+            log.warning(f"  Sin imágenes en DOM: {title_raw!r}")
+            try:
+                album_dir.rmdir()
+            except Exception:
+                pass
             return
 
-        log.info(f"  {len(captured)} imágenes capturadas")
+        log.info(f"  {len(img_urls)} imágenes")
         saved = 0
-        for i, (url, body) in enumerate(captured.items(), 1):
+        for i, url in enumerate(img_urls, 1):
             filename = re.findall(r'/([^/?]+)', url)[-1]
             path = album_dir / f"{Path(filename).stem}.jpg"
             if path.exists():
                 saved += 1
                 continue
-            await self.save_image(body, path)
-            log.info(f"    [{i}/{len(captured)}] {path.name}")
-            saved += 1
+            # fetch desde dentro del navegador para pasar el WAF
+            body = await page.evaluate("""async (url) => {
+                try {
+                    const r = await fetch(url, {credentials: 'include'});
+                    if (!r.ok) return null;
+                    const buf = await r.arrayBuffer();
+                    return Array.from(new Uint8Array(buf));
+                } catch(e) { return null; }
+            }""", url)
+            if body:
+                await self.save_image(bytes(body), path)
+                log.info(f"    [{i}/{len(img_urls)}] {path.name}")
+                saved += 1
+            else:
+                log.warning(f"    [{i}/{len(img_urls)}] fetch fallido: {url}")
+            await asyncio.sleep(0.3)
 
         if saved == 0:
-            # si no se capturó nada elimina la carpeta vacía
             try:
                 album_dir.rmdir()
             except Exception:
