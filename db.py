@@ -256,5 +256,29 @@ def estado_label(estado: str) -> str:
 
 # ── Bootstrap ───────────────────────────────────────────────────────────────
 
+def seed_demo_if_empty():
+    """Inserta productos de demo si la BD está vacía. Útil en Render."""
+    with get_connection() as conn:
+        count = conn.execute("SELECT COUNT(*) FROM productos").fetchone()[0]
+    if count > 0:
+        return
+    demos = [
+        ("Camiseta Real Madrid 25/26 Local",    18.0, "", "https://baike5555.x.yupoo.com/albums/123", '["S","M","L","XL","XXL"]', "La Liga",        "Real Madrid"),
+        ("Camiseta Barcelona 25/26 Local",       18.0, "", "https://baike5555.x.yupoo.com/albums/124", '["S","M","L","XL","XXL"]', "La Liga",        "FC Barcelona"),
+        ("Camiseta Manchester City 25/26 Local", 18.0, "", "https://baike5555.x.yupoo.com/albums/125", '["S","M","L","XL","XXL"]', "Premier League", "Manchester City"),
+        ("Camiseta PSG 25/26 Local",             18.0, "", "https://baike5555.x.yupoo.com/albums/126", '["S","M","L","XL","XXL"]', "Ligue 1",        "PSG"),
+        ("Camiseta Brasil 2026 Local",           18.0, "", "https://baike5555.x.yupoo.com/albums/127", '["S","M","L","XL","XXL"]', "Selecciones",    "Brasil"),
+        ("Camiseta Argentina 2026 Local",        18.0, "", "https://baike5555.x.yupoo.com/albums/128", '["S","M","L","XL","XXL"]', "Selecciones",    "Argentina"),
+    ]
+    with get_connection() as conn:
+        for nombre, precio, foto, yupoo_url, tallas, liga, equipo in demos:
+            conn.execute(
+                "INSERT OR IGNORE INTO productos (nombre, precio, foto_path, yupoo_url, tallas, liga, equipo) VALUES (?,?,?,?,?,?,?)",
+                (nombre, precio, foto, yupoo_url, tallas, liga, equipo)
+            )
+        conn.commit()
+    print("[db] Productos de demo insertados.")
+
+
 if __name__ == "__main__":
     init_db()

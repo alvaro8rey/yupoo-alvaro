@@ -861,6 +861,7 @@ async def mensaje_inesperado(update: Update, context: ContextTypes.DEFAULT_TYPE)
 
 def main():
     db.init_db()
+    db.seed_demo_if_empty()
 
     app = Application.builder().token(BOT_TOKEN).build()
 
