@@ -32,6 +32,7 @@ import os
 BOT_TOKEN     = os.environ.get("BOT_TOKEN", "8904389544:AAGzBLce1zDXjtfY0JJ8FDVX8pBQDz0p1XE")
 ADMIN_CHAT_ID = int(os.environ.get("ADMIN_CHAT_ID", "0"))
 PAYPAL_USER   = os.environ.get("PAYPAL_USER", "tu.paypal@email.com")
+BIZUM_NUMERO  = os.environ.get("BIZUM_NUMERO", "")
 BOT_USERNAME  = os.environ.get("BOT_USERNAME", "tu_bot")
 
 PRECIO_BASE           = 18.0
@@ -569,10 +570,11 @@ async def recibir_datos_envio(update: Update, context: ContextTypes.DEFAULT_TYPE
         f"📦 *Datos de envío registrados.*\n\n"
         f"💳 *Instrucciones de pago:*\n"
         f"El total de tu pedido es *{total:.2f} €*.\n\n"
-        f"Realiza el pago a través de PayPal:\n"
-        f"👉 *paypal.me/{PAYPAL_USER}*\n\n"
-        f"⚠️ Indica tu nombre en el *concepto/nota* del pago.\n\n"
-        f"Una vez realizado, escribe aquí el *ID de transacción de PayPal*:",
+        f"Puedes pagar por:\n\n"
+        f"• *PayPal:* paypal.me/{PAYPAL_USER}\n"
+        + (f"• *Bizum:* {BIZUM_NUMERO}\n" if BIZUM_NUMERO else "")
+        + f"\n⚠️ Indica tu nombre en el *concepto/nota* del pago.\n\n"
+        f"Una vez realizado, escribe aquí el *ID de transacción o referencia de pago*:",
         parse_mode=ParseMode.MARKDOWN,
     )
     return ESPERANDO_REFERENCIA_PAYPAL
@@ -664,8 +666,11 @@ async def _notificar_admin_nuevo_pedido(
             tipo = it.get("tipo_personalizacion", "")
             parches_txt = " + parches" if tipo == "nombre_numero_parches" else ""
             pers = f" ✏️ {it['nombre_dorsal']} #{it['numero_dorsal']}{parches_txt}"
+        # Añadir URL de Yupoo si existe
+        producto = db.get_producto_admin(it["producto_id"])
+        yupoo = f"\n    🔗 {producto['yupoo_url']}" if producto and producto.get("yupoo_url") else ""
         items_txt.append(
-            f"  • {it['nombre_producto']} T:{it['talla']} × {it['cantidad']} — {it['precio_unitario']:.2f}€{pers}"
+            f"  • {it['nombre_producto']} T:{it['talla']} × {it['cantidad']} — {it['precio_unitario']:.2f}€{pers}{yupoo}"
         )
 
     texto = (
@@ -675,8 +680,8 @@ async def _notificar_admin_nuevo_pedido(
         f"📍 *Dirección:* {direccion}\n\n"
         f"🛍 *Productos:*\n" + "\n".join(items_txt) + "\n\n"
         f"💰 *Total: {total:.2f} €*\n"
-        f"💳 *Ref PayPal:* `{paypal_ref}`\n\n"
-        f"⚠️ Verifica el pago en PayPal antes de confirmar."
+        f"💳 *Ref pago:* `{paypal_ref}`\n\n"
+        f"⚠️ Verifica el pago antes de confirmar."
     )
 
     teclado = InlineKeyboardMarkup([
