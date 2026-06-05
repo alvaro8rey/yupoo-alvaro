@@ -205,18 +205,13 @@ class YupooPlaywright:
             n += 1
 
         log.info(f"  Álbum: {title_raw!r} -> {album_dir.name!r}")
+        album_dir.mkdir(parents=True, exist_ok=True)
+        (album_dir / ".url").write_text(album_url_clean)
 
-        # modo solo portadas: guardar directamente en la carpeta del catálogo, sin subcarpeta
+        # modo solo portadas: entrar al álbum y coger solo la primera imagen
         if self.covers_only:
             folder_name = sanitize(title_es)
-            covers_dir = self.output / self.catalog_name / "portadas"
-            covers_dir.mkdir(parents=True, exist_ok=True)
-            # evitar colisiones de nombre
-            path = covers_dir / f"{folder_name}.jpg"
-            suffix = 2
-            while path.exists():
-                path = covers_dir / f"{folder_name} - {suffix}.jpg"
-                suffix += 1
+            path = album_dir / f"{folder_name}.jpg"
 
             captured = {}
             async def capture_first(response):
@@ -250,8 +245,6 @@ class YupooPlaywright:
                     pass
             return
 
-        album_dir.mkdir(parents=True, exist_ok=True)
-        (album_dir / ".url").write_text(album_url_clean)
         captured: dict[str, bytes] = {}
 
         async def capture_response(response):
