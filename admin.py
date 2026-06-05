@@ -390,9 +390,13 @@ def producto_toggle(producto_id: int):
     if not p:
         abort(404)
     nuevo = 0 if p["activo"] else 1
-    with db.get_connection() as conn:
-        conn.execute("UPDATE productos SET activo = ? WHERE id = ?", (nuevo, producto_id))
+    conn = db.get_connection()
+    try:
+        c = conn.cursor()
+        c.execute("UPDATE productos SET activo = %s WHERE id = %s", (nuevo, producto_id))
         conn.commit()
+    finally:
+        conn.close()
     flash("Estado actualizado.", "success")
     return redirect(url_for("productos_list"))
 
@@ -503,15 +507,19 @@ def producto_nuevo():
                                       submit_label="Crear producto"),
                 active="productos", style=BASE_STYLE)
 
-        with db.get_connection() as conn:
-            cur = conn.execute(
+        conn = db.get_connection()
+        try:
+            c = conn.cursor()
+            c.execute(
                 "INSERT INTO productos (nombre, precio, liga, equipo, yupoo_url, tallas, activo) "
-                "VALUES (?, ?, ?, ?, ?, ?, ?)",
+                "VALUES (%s, %s, %s, %s, %s, %s, %s) RETURNING id",
                 (data["nombre"], data["precio"], data["liga"], data["equipo"],
                  data["yupoo_url"], data["tallas"], data["activo"])
             )
+            producto_id = c.fetchone()["id"]
             conn.commit()
-            producto_id = cur.lastrowid
+        finally:
+            conn.close()
 
         # Handle photo uploads
         fotos = request.files.getlist("fotos")
@@ -545,14 +553,18 @@ def producto_editar(producto_id: int):
         if not data["nombre"]:
             flash("El nombre es obligatorio.", "error")
         else:
-            with db.get_connection() as conn:
-                conn.execute(
-                    "UPDATE productos SET nombre=?, precio=?, liga=?, equipo=?, "
-                    "yupoo_url=?, tallas=?, activo=? WHERE id=?",
+            conn = db.get_connection()
+            try:
+                c = conn.cursor()
+                c.execute(
+                    "UPDATE productos SET nombre=%s, precio=%s, liga=%s, equipo=%s, "
+                    "yupoo_url=%s, tallas=%s, activo=%s WHERE id=%s",
                     (data["nombre"], data["precio"], data["liga"], data["equipo"],
                      data["yupoo_url"], data["tallas"], data["activo"], producto_id)
                 )
                 conn.commit()
+            finally:
+                conn.close()
             flash("Producto actualizado.", "success")
             return redirect(url_for("productos_list"))
 
@@ -648,10 +660,13 @@ def producto_fotos(producto_id: int):
 @app.route("/admin/fotos/<int:foto_id>/portada", methods=["POST"])
 @login_required
 def foto_set_portada(foto_id: int):
-    with db.get_connection() as conn:
-        row = conn.execute(
-            "SELECT producto_id FROM fotos_producto WHERE id = ?", (foto_id,)
-        ).fetchone()
+    conn = db.get_connection()
+    try:
+        c = conn.cursor()
+        c.execute("SELECT producto_id FROM fotos_producto WHERE id = %s", (foto_id,))
+        row = c.fetchone()
+    finally:
+        conn.close()
     if not row:
         abort(404)
     producto_id = row["producto_id"]
@@ -663,10 +678,13 @@ def foto_set_portada(foto_id: int):
 @app.route("/admin/fotos/<int:foto_id>/eliminar", methods=["POST"])
 @login_required
 def foto_eliminar(foto_id: int):
-    with db.get_connection() as conn:
-        row = conn.execute(
-            "SELECT producto_id FROM fotos_producto WHERE id = ?", (foto_id,)
-        ).fetchone()
+    conn = db.get_connection()
+    try:
+        c = conn.cursor()
+        c.execute("SELECT producto_id FROM fotos_producto WHERE id = %s", (foto_id,))
+        row = c.fetchone()
+    finally:
+        conn.close()
     if not row:
         abort(404)
     producto_id = row["producto_id"]
