@@ -22,7 +22,6 @@ import logging
 from pathlib import Path
 from io import BytesIO
 
-import httpx
 import aiofiles
 from PIL import Image, ImageFile
 from playwright.async_api import async_playwright, Page
@@ -162,23 +161,24 @@ class YupooPlaywright:
             async with aiofiles.open(path, "wb") as f:
                 await f.write(img_bytes)
 
-    async def download_image(self, client: httpx.AsyncClient, url: str, path: Path, n: int, total: int):
+    async def download_image(self, context, url: str, path: Path, n: int, total: int):
         if path.exists():
             return
         for attempt in range(4):
             try:
-                r = await client.get(url, timeout=30)
-                if r.status_code == 200:
-                    await self.save_image(r.content, path)
+                # usar el contexto del navegador para que lleve cookies y headers correctos
+                response = await context.request.get(url, timeout=30000)
+                if response.ok:
+                    await self.save_image(await response.body(), path)
                     log.info(f"    [{n}/{total}] {path.name}")
                     return
-                log.warning(f"    [{n}/{total}] HTTP {r.status_code} -> {url}")
+                log.warning(f"    [{n}/{total}] HTTP {response.status} -> {url}")
             except Exception as e:
                 log.warning(f"    [{n}/{total}] intento {attempt+1} fallido: {e}")
             await asyncio.sleep(2 ** attempt)
         log.error(f"    [{n}/{total}] no se pudo descargar: {url}")
 
-    async def download_album(self, page: Page, client: httpx.AsyncClient, album: dict):
+    async def download_album(self, page: Page, context, album: dict):
         title_raw = album["title"]
         title_es = translate(title_raw) if self.translate else title_raw
         folder = sanitize(title_es)
@@ -198,7 +198,7 @@ class YupooPlaywright:
         for i, url in enumerate(img_urls, 1):
             filename = re.findall(r'/([^/?]+)', url)[-1]
             path = album_dir / f"{Path(filename).stem}.jpg"
-            await self.download_image(client, url, path, i, len(img_urls))
+            await self.download_image(context, url, path, i, len(img_urls))
             await asyncio.sleep(random.uniform(0.3, 0.8))
 
     # -------------------------------------------------------- run
@@ -235,15 +235,10 @@ class YupooPlaywright:
                 await browser.close()
                 return
 
-            async with httpx.AsyncClient(headers={
-                "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
-                              "(KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
-                "Referer": "https://yupoo.com/",
-            }) as client:
-                for i, album in enumerate(albums, 1):
-                    log.info(f"[{i}/{len(albums)}]")
-                    await self.download_album(page, client, album)
-                    await human_delay(1, 3)
+            for i, album in enumerate(albums, 1):
+                log.info(f"[{i}/{len(albums)}]")
+                await self.download_album(page, context, album)
+                await human_delay(1, 3)
 
             await browser.close()
         log.info(f"Hecho. Imágenes en: {self.output / self.catalog_name}")
