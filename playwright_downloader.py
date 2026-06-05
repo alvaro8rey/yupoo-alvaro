@@ -47,7 +47,7 @@ def translate(text: str) -> str:
         return text
 
 
-async def human_delay(min_s=0.8, max_s=2.5):
+async def human_delay(min_s=0.3, max_s=0.8):
     await asyncio.sleep(random.uniform(min_s, max_s))
 
 
@@ -190,19 +190,19 @@ class YupooPlaywright:
             log.warning(f"  Timeout cargando álbum, continuando: {e}")
             page.remove_listener("response", capture_response)
             return
-        await human_delay(0.5, 1)
+        await human_delay(0.2, 0.5)
 
         # scroll progresivo para forzar lazy loading, máximo 30 iteraciones
         prev_height = 0
         for _ in range(30):
-            await page.evaluate("window.scrollBy(0, 600)")
-            await asyncio.sleep(0.3)
+            await page.evaluate("window.scrollBy(0, 800)")
+            await asyncio.sleep(0.15)
             height = await page.evaluate("document.body.scrollHeight")
             scroll_y = await page.evaluate("window.scrollY + window.innerHeight")
             if scroll_y >= height and height == prev_height:
                 break
             prev_height = height
-        await asyncio.sleep(1)
+        await asyncio.sleep(0.5)
 
         # obtener lista de URLs en orden desde el DOM
         if self.covers_only:
@@ -304,7 +304,7 @@ class YupooPlaywright:
             for i, album in enumerate(albums, 1):
                 log.info(f"[{i}/{len(albums)}]")
                 await self.download_album(page, album)
-                await human_delay(1, 3)
+                await human_delay(0.3, 0.8)
 
             await browser.close()
         log.info(f"Hecho. Imágenes en: {self.output / self.catalog_name}")
