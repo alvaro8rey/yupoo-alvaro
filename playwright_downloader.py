@@ -120,65 +120,7 @@ class YupooPlaywright:
             await human_delay()
         return albums
 
-    async def get_image_urls(self, page: Page, album_url: str) -> list[str]:
-        await page.goto(album_url, wait_until="domcontentloaded")
-        await human_delay()
-        imgs = []
-
-        if self.covers_only:
-            cover = await page.query_selector(".showalbumheader__gallerycover img")
-            if cover:
-                src = await cover.get_attribute("src") or ""
-                if src:
-                    imgs.append("https:" + src if src.startswith("//") else src)
-            return imgs
-
-        divs = await page.query_selector_all("div.showalbum__children")
-        for div in divs:
-            wrap = await div.query_selector(".image__imagewrap")
-            if wrap and await wrap.get_attribute("data-type") == "video":
-                continue
-            img = await div.query_selector("img")
-            if not img:
-                continue
-            src = await img.get_attribute("data-origin-src") or await img.get_attribute("src") or ""
-            if src:
-                imgs.append("https:" + src if src.startswith("//") else src)
-        return imgs
-
-    # -------------------------------------------------------- download
-
-    async def save_image(self, img_bytes: bytes, path: Path):
-        path.parent.mkdir(parents=True, exist_ok=True)
-        try:
-            img = Image.open(BytesIO(img_bytes)).convert("RGB")
-            buf = BytesIO()
-            img.save(buf, format="JPEG", quality=95)
-            async with aiofiles.open(path, "wb") as f:
-                await f.write(buf.getvalue())
-        except Exception as e:
-            log.warning(f"Error procesando imagen {path.name}: {e} — guardando raw")
-            async with aiofiles.open(path, "wb") as f:
-                await f.write(img_bytes)
-
-    async def download_image(self, context, url: str, path: Path, n: int, total: int):
-        if path.exists():
-            return
-        for attempt in range(4):
-            try:
-                # usar el contexto del navegador para que lleve cookies y headers correctos
-                response = await context.request.get(url, timeout=30000)
-                if response.ok:
-                    await self.save_image(await response.body(), path)
-                    log.info(f"    [{n}/{total}] {path.name}")
-                    return
-                log.warning(f"    [{n}/{total}] HTTP {response.status} -> {url}")
-            except Exception as e:
-                log.warning(f"    [{n}/{total}] intento {attempt+1} fallido: {e}")
-            await asyncio.sleep(2 ** attempt)
-        log.error(f"    [{n}/{total}] no se pudo descargar: {url}")
-
-    async def download_album(self, page: Page, context, album: dict):
+    async def download_album(self, page: Page, album: dict):
         title_raw = album["title"]
         title_es = translate(title_raw) if self.translate else title_raw
         folder = sanitize(title_es)
@@ -189,17 +131,86 @@ class YupooPlaywright:
             return
 
         log.info(f"  Álbum: {title_raw!r} -> {folder!r}")
-        img_urls = await self.get_image_urls(page, album["url"])
-        if not img_urls:
-            log.warning(f"  Sin imágenes en: {title_raw!r}")
+        album_dir.mkdir(parents=True, exist_ok=True)
+
+        captured: dict[str, bytes] = {}
+
+        async def capture_response(response):
+            url = response.url
+            if "photo.yupoo.com" in url and url.endswith((".jpeg", ".jpg", ".png", ".webp")):
+                try:
+                    body = await response.body()
+                    if body:
+                        captured[url] = body
+                except Exception:
+                    pass
+
+        page.on("response", capture_response)
+        await page.goto(album["url"], wait_until="domcontentloaded")
+        await human_delay(1, 2)
+
+        # obtener lista de URLs en orden desde el DOM
+        if self.covers_only:
+            cover = await page.query_selector(".showalbumheader__gallerycover img")
+            src = await cover.get_attribute("src") if cover else ""
+            ordered_urls = ["https:" + src] if src and src.startswith("//") else ([src] if src else [])
+        else:
+            ordered_urls = []
+            divs = await page.query_selector_all("div.showalbum__children")
+            for div in divs:
+                wrap = await div.query_selector(".image__imagewrap")
+                if wrap and await wrap.get_attribute("data-type") == "video":
+                    continue
+                img = await div.query_selector("img")
+                if not img:
+                    continue
+                src = await img.get_attribute("data-origin-src") or await img.get_attribute("src") or ""
+                if src:
+                    ordered_urls.append("https:" + src if src.startswith("//") else src)
+
+        # esperar a que se capturen las imágenes visibles
+        await asyncio.sleep(1)
+        page.remove_listener("response", capture_response)
+
+        if not ordered_urls:
+            log.warning(f"  Sin imágenes: {title_raw!r}")
             return
 
-        log.info(f"  {len(img_urls)} imágenes")
-        for i, url in enumerate(img_urls, 1):
+        log.info(f"  {len(ordered_urls)} imágenes")
+        saved = 0
+        for i, url in enumerate(ordered_urls, 1):
             filename = re.findall(r'/([^/?]+)', url)[-1]
             path = album_dir / f"{Path(filename).stem}.jpg"
-            await self.download_image(context, url, path, i, len(img_urls))
-            await asyncio.sleep(random.uniform(0.3, 0.8))
+            if path.exists():
+                saved += 1
+                continue
+            body = captured.get(url)
+            if body:
+                await self.save_image(body, path)
+                log.info(f"    [{i}/{len(ordered_urls)}] {path.name}")
+                saved += 1
+            else:
+                log.warning(f"    [{i}/{len(ordered_urls)}] no capturada: {url}")
+
+        if saved == 0:
+            # si no se capturó nada elimina la carpeta vacía
+            try:
+                album_dir.rmdir()
+            except Exception:
+                pass
+
+    async def save_image(self, img_bytes: bytes, path: Path):
+        path.parent.mkdir(parents=True, exist_ok=True)
+        try:
+            img = Image.open(BytesIO(img_bytes)).convert("RGB")
+            buf = BytesIO()
+            img.save(buf, format="JPEG", quality=95)
+            async with aiofiles.open(path, "wb") as f:
+                await f.write(buf.getvalue())
+        except Exception as e:
+            log.warning(f"Error procesando {path.name}: {e} — guardando raw")
+            async with aiofiles.open(path, "wb") as f:
+                await f.write(img_bytes)
 
     # -------------------------------------------------------- run
 
@@ -237,7 +248,7 @@ class YupooPlaywright:
 
             for i, album in enumerate(albums, 1):
                 log.info(f"[{i}/{len(albums)}]")
-                await self.download_album(page, context, album)
+                await self.download_album(page, album)
                 await human_delay(1, 3)
 
             await browser.close()
