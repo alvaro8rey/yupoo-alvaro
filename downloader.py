@@ -186,20 +186,22 @@ class YupooDownloader:
             log.warning(f"  Sin imágenes: {album['title']}")
             return
         log.info(f"  {album['title']} -> {len(img_urls)} imágenes")
-        tasks = []
-        for url in img_urls:
+        for i, url in enumerate(img_urls, 1):
             filename = re.findall(r'/([^/]+)$', url)[0].split("?")[0]
             stem = Path(filename).stem
             path = album_dir / f"{stem}.jpg"
-            tasks.append(self.download_one(url, path))
-        await asyncio.gather(*tasks)
+            await self.download_one(url, path, i, len(img_urls))
+            await asyncio.sleep(0.5)
 
-    async def download_one(self, url: str, path: Path):
+    async def download_one(self, url: str, path: Path, n: int = 0, total: int = 0):
         if path.exists():
             return
         data = await self.get(url, binary=True)
         if data:
             await self.save_image(data, path)
+            log.info(f"    [{n}/{total}] guardada: {path.name}")
+        else:
+            log.warning(f"    [{n}/{total}] no se pudo descargar: {url}")
 
     async def get_albums_from_category(self, cat_url: str) -> list[dict]:
         """Obtiene álbums de una URL de categoría o colección."""
