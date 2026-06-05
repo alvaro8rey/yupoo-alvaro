@@ -5,3 +5,5 @@ requirements.txt
 *.json
 info.log
 tienda.db
+web/
+seed_demo.py

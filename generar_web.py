@@ -14,8 +14,8 @@ from pathlib import Path
 from db import init_db, get_todos_productos
 
 # ── Configuración ────────────────────────────────────────────────────────────
-BOT_USERNAME = "tu_bot"          # ← cambia esto
-STORE_NAME   = "Tu Tienda de Camisetas"
+BOT_USERNAME = "tu_bot"       # ← cambia por el username de tu bot sin @
+STORE_NAME   = "Camisetas Premium"
 MONEDA       = "€"
 # ─────────────────────────────────────────────────────────────────────────────
 
