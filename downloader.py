@@ -51,7 +51,7 @@ class YupooDownloader:
         self.output = output
         self.covers_only = covers_only
         self.translate = not no_translate
-        self.sem = asyncio.Semaphore(10)
+        self.sem = asyncio.Semaphore(3)
         self.session: aiohttp.ClientSession = None
         self.catalog_name = ""
 
@@ -200,7 +200,7 @@ class YupooDownloader:
         self.catalog_name = self.extract_catalog_name(self.base_url)
         log.info(f"Catálogo: {self.catalog_name}")
 
-        connector = aiohttp.TCPConnector(limit=20, ssl=SSL_CTX)
+        connector = aiohttp.TCPConnector(limit=5, ssl=SSL_CTX)
         async with aiohttp.ClientSession(connector=connector) as session:
             self.session = session
 
@@ -216,6 +216,7 @@ class YupooDownloader:
                 album_dir = self.output / self.catalog_name / folder_name
                 log.info(f"Álbum: {title_raw!r} -> {folder_name!r}")
                 await self.download_album(album, album_dir)
+                await asyncio.sleep(1.5)
 
         log.info(f"Descarga completa. Imágenes en: {self.output / self.catalog_name}")
 
