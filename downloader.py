@@ -196,7 +196,26 @@ class YupooDownloader:
         if data:
             await self.save_image(data, path)
 
-    async def run(self):
+    async def get_albums_from_category(self, cat_url: str) -> list[dict]:
+        """Obtiene álbums de una URL de categoría o colección."""
+        # normalizar URL quitando parámetros
+        base = re.sub(r'\?.*$', '', cat_url.rstrip("/"))
+        total = await self.get_page_count(f"{base}?page=1")
+        log.info(f"  Páginas en categoría: {total}")
+        tasks = [
+            self.get_albums_from_page(f"{base}?page={p}")
+            for p in range(1, total + 1)
+        ]
+        results = await asyncio.gather(*tasks)
+        return [a for page in results for a in page]
+
+    def is_album_url(self, url: str) -> bool:
+        return bool(re.search(r'/albums/\d+', url))
+
+    def is_category_url(self, url: str) -> bool:
+        return bool(re.search(r'/(categories|collections)/', url))
+
+    async def run(self, specific_urls: list[str] = None):
         self.catalog_name = self.extract_catalog_name(self.base_url)
         log.info(f"Catálogo: {self.catalog_name}")
 
@@ -204,17 +223,37 @@ class YupooDownloader:
         async with aiohttp.ClientSession(connector=connector) as session:
             self.session = session
 
-            albums = await self.get_all_albums()
+            if specific_urls:
+                albums = []
+                for url in specific_urls:
+                    if self.is_album_url(url):
+                        # es un álbum directo: obtener su título del HTML
+                        html = await self.get(url)
+                        if html:
+                            soup = BeautifulSoup(html, "lxml")
+                            title_tag = soup.select_one("span.showalbumheader__gallerytitle")
+                            title = title_tag.text.strip() if title_tag else "album"
+                            clean_url = re.sub(r'\?.*$', '', url) + "?uid=1"
+                            albums.append({"title": title, "url": clean_url})
+                    elif self.is_category_url(url):
+                        cat_albums = await self.get_albums_from_category(url)
+                        albums.extend(cat_albums)
+                    else:
+                        log.warning(f"URL no reconocida, ignorando: {url}")
+            else:
+                albums = await self.get_all_albums()
+
             if not albums:
                 log.error("No se encontraron álbums. Verifica la URL.")
                 return
 
-            for album in albums:
+            log.info(f"Total álbums a descargar: {len(albums)}")
+            for i, album in enumerate(albums, 1):
                 title_raw = album["title"]
                 title_es = translate(title_raw) if self.translate else title_raw
                 folder_name = sanitize(title_es)
                 album_dir = self.output / self.catalog_name / folder_name
-                log.info(f"Álbum: {title_raw!r} -> {folder_name!r}")
+                log.info(f"[{i}/{len(albums)}] {title_raw!r} -> {folder_name!r}")
                 await self.download_album(album, album_dir)
                 await asyncio.sleep(1.5)
 
@@ -223,22 +262,62 @@ class YupooDownloader:
 
 # ---------------------------------------------------------------------- CLI
 
+def menu_interactivo() -> tuple[str, list[str] | None, bool, bool, str]:
+    """Menú simple en terminal, devuelve (base_url, urls_especificas, solo_portadas, sin_traduccion, carpeta)."""
+    print("\n===== YUPOO DOWNLOADER =====")
+    base_url = input("URL del catálogo (ej: https://nombre.x.yupoo.com): ").strip()
+    print()
+    print("¿Qué quieres descargar?")
+    print("  1. Toda la colección — todas las fotos")
+    print("  2. Toda la colección — solo portadas")
+    print("  3. Álbums o categorías concretas — todas las fotos")
+    print("  4. Álbums o categorías concretas — solo portadas")
+    opcion = input("Opción (1-4): ").strip()
+
+    specific_urls = None
+    covers_only = opcion in ("2", "4")
+
+    if opcion in ("3", "4"):
+        print("Pega las URLs una por una. Escribe 'ok' cuando termines:")
+        specific_urls = []
+        while True:
+            u = input("  URL: ").strip()
+            if u.lower() == "ok":
+                break
+            if u:
+                specific_urls.append(u)
+
+    carpeta = input("\nCarpeta de destino [./fotos_yupoo]: ").strip() or "./fotos_yupoo"
+    sin_trad = input("¿Desactivar traducción al español? (s/N): ").strip().lower() == "s"
+
+    return base_url, specific_urls, covers_only, sin_trad, carpeta
+
+
 def main():
     parser = argparse.ArgumentParser(description="Descargador de imágenes Yupoo")
-    parser.add_argument("url", help="URL del catálogo Yupoo (ej: https://nombre.x.yupoo.com)")
+    parser.add_argument("url", nargs="?", help="URL base del catálogo (omitir para menú interactivo)")
+    parser.add_argument("--urls", nargs="+", help="URLs concretas de álbums o categorías")
     parser.add_argument("--carpeta", default="./fotos_yupoo", help="Carpeta de destino")
-    parser.add_argument("--solo-portadas", action="store_true", help="Descargar solo la foto de portada de cada álbum")
-    parser.add_argument("--sin-traduccion", action="store_true", help="No traducir nombres al español")
+    parser.add_argument("--solo-portadas", action="store_true")
+    parser.add_argument("--sin-traduccion", action="store_true")
     args = parser.parse_args()
 
-    output = Path(args.carpeta)
+    if args.url:
+        base_url = args.url
+        specific_urls = args.urls or None
+        covers_only = args.solo_portadas
+        no_translate = args.sin_traduccion
+        carpeta = args.carpeta
+    else:
+        base_url, specific_urls, covers_only, no_translate, carpeta = menu_interactivo()
+
     downloader = YupooDownloader(
-        base_url=args.url,
-        output=output,
-        covers_only=args.solo_portadas,
-        no_translate=args.sin_traduccion,
+        base_url=base_url,
+        output=Path(carpeta),
+        covers_only=covers_only,
+        no_translate=no_translate,
     )
-    asyncio.run(downloader.run())
+    asyncio.run(downloader.run(specific_urls=specific_urls))
 
 
 if __name__ == "__main__":
