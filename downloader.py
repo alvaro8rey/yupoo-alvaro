@@ -67,7 +67,12 @@ class YupooDownloader:
                     ) as resp:
                         if resp.status == 200:
                             return await resp.read() if binary else await resp.text()
-                        log.warning(f"HTTP {resp.status} -> {url}")
+                        if resp.status in (429, 567, 503):
+                            wait = 10 * (attempt + 1)
+                            log.warning(f"Rate limit (HTTP {resp.status}), esperando {wait}s -> {url}")
+                            await asyncio.sleep(wait)
+                        else:
+                            log.warning(f"HTTP {resp.status} -> {url}")
             except Exception as e:
                 log.warning(f"Intento {attempt+1}/{retries} fallido ({url}): {e}")
             await asyncio.sleep(2 ** attempt)
@@ -255,7 +260,7 @@ class YupooDownloader:
                 album_dir = self.output / self.catalog_name / folder_name
                 log.info(f"[{i}/{len(albums)}] {title_raw!r} -> {folder_name!r}")
                 await self.download_album(album, album_dir)
-                await asyncio.sleep(1.5)
+                await asyncio.sleep(3)
 
         log.info(f"Descarga completa. Imágenes en: {self.output / self.catalog_name}")
 
