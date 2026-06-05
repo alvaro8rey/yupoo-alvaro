@@ -182,19 +182,34 @@ class YupooPlaywright:
         log.info(f"  Álbum: {title_raw!r} -> {folder!r}")
         album_dir.mkdir(parents=True, exist_ok=True)
 
-        # modo solo portadas: nunca entrar al álbum
+        # modo solo portadas: entrar al álbum y coger solo la primera imagen
         if self.covers_only:
             folder_name = sanitize(title_es)
             path = album_dir / f"{folder_name}.jpg"
-            img_bytes = None
-            if album.get("cover"):
-                img_bytes = album["cover"]
-            elif album.get("cover_url"):
-                img_bytes = await self._fetch_via_browser(page, album["cover_url"])
 
-            if img_bytes:
-                await self.save_image(img_bytes, path)
-                size_kb = len(img_bytes) // 1024
+            captured = {}
+            async def capture_first(response):
+                url = response.url
+                if "photo.yupoo.com" in url and not captured:
+                    try:
+                        body = await response.body()
+                        if body:
+                            captured["body"] = body
+                            captured["url"] = url
+                    except Exception:
+                        pass
+
+            page.on("response", capture_first)
+            try:
+                await page.goto(album["url"], wait_until="domcontentloaded", timeout=20000)
+                await asyncio.sleep(0.8)
+            except Exception as e:
+                log.warning(f"  Timeout: {e}")
+            page.remove_listener("response", capture_first)
+
+            if captured.get("body"):
+                await self.save_image(captured["body"], path)
+                size_kb = len(captured["body"]) // 1024
                 log.info(f"    guardada: {path.name} ({size_kb}KB)")
             else:
                 log.warning(f"    sin imagen: {title_raw!r}")
