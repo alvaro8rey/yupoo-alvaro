@@ -36,7 +36,7 @@ def init_db():
             )
         """)
 
-        # Safe migrations: add liga and equipo columns if they don't exist yet
+        # Safe migrations
         existing_cols = {row[1] for row in c.execute("PRAGMA table_info(productos)").fetchall()}
         if "liga" not in existing_cols:
             c.execute("ALTER TABLE productos ADD COLUMN liga TEXT NOT NULL DEFAULT ''")
@@ -75,6 +75,17 @@ def init_db():
             )
         """)
 
+        c.execute("""
+            CREATE TABLE IF NOT EXISTS fotos_producto (
+                id          INTEGER PRIMARY KEY AUTOINCREMENT,
+                producto_id INTEGER NOT NULL REFERENCES productos(id) ON DELETE CASCADE,
+                datos       BLOB    NOT NULL,
+                nombre      TEXT    NOT NULL DEFAULT '',
+                es_portada  INTEGER NOT NULL DEFAULT 0,
+                orden       INTEGER NOT NULL DEFAULT 0
+            )
+        """)
+
         conn.commit()
         print(f"[db] Base de datos inicializada en: {DB_PATH}")
     finally:
@@ -86,7 +97,36 @@ def init_db():
 def get_producto(producto_id: int) -> dict | None:
     with get_connection() as conn:
         row = conn.execute(
-            "SELECT * FROM productos WHERE id = ? AND activo = 1", (producto_id,)
+            """
+            SELECT p.*,
+                   COALESCE(p.liga,'') AS liga,
+                   COALESCE(p.equipo,'') AS equipo,
+                   fp.id AS portada_id
+            FROM productos p
+            LEFT JOIN fotos_producto fp
+                   ON fp.producto_id = p.id AND fp.es_portada = 1
+            WHERE p.id = ? AND p.activo = 1
+            """,
+            (producto_id,)
+        ).fetchone()
+    return dict(row) if row else None
+
+
+def get_producto_admin(producto_id: int) -> dict | None:
+    """Como get_producto pero incluye productos inactivos (para el panel admin)."""
+    with get_connection() as conn:
+        row = conn.execute(
+            """
+            SELECT p.*,
+                   COALESCE(p.liga,'') AS liga,
+                   COALESCE(p.equipo,'') AS equipo,
+                   fp.id AS portada_id
+            FROM productos p
+            LEFT JOIN fotos_producto fp
+                   ON fp.producto_id = p.id AND fp.es_portada = 1
+            WHERE p.id = ?
+            """,
+            (producto_id,)
         ).fetchone()
     return dict(row) if row else None
 
@@ -95,15 +135,30 @@ def get_todos_productos(solo_activos: bool = True) -> list[dict]:
     with get_connection() as conn:
         if solo_activos:
             rows = conn.execute(
-                "SELECT id, nombre, precio, foto_path, yupoo_url, tallas, activo, "
-                "COALESCE(liga,'') AS liga, COALESCE(equipo,'') AS equipo "
-                "FROM productos WHERE activo = 1 ORDER BY nombre"
+                """
+                SELECT p.id, p.nombre, p.precio, p.foto_path, p.yupoo_url,
+                       p.tallas, p.activo,
+                       COALESCE(p.liga,'') AS liga, COALESCE(p.equipo,'') AS equipo,
+                       fp.id AS portada_id
+                FROM productos p
+                LEFT JOIN fotos_producto fp
+                       ON fp.producto_id = p.id AND fp.es_portada = 1
+                WHERE p.activo = 1
+                ORDER BY p.nombre
+                """
             ).fetchall()
         else:
             rows = conn.execute(
-                "SELECT id, nombre, precio, foto_path, yupoo_url, tallas, activo, "
-                "COALESCE(liga,'') AS liga, COALESCE(equipo,'') AS equipo "
-                "FROM productos ORDER BY nombre"
+                """
+                SELECT p.id, p.nombre, p.precio, p.foto_path, p.yupoo_url,
+                       p.tallas, p.activo,
+                       COALESCE(p.liga,'') AS liga, COALESCE(p.equipo,'') AS equipo,
+                       fp.id AS portada_id
+                FROM productos p
+                LEFT JOIN fotos_producto fp
+                       ON fp.producto_id = p.id AND fp.es_portada = 1
+                ORDER BY p.nombre
+                """
             ).fetchall()
     return [dict(r) for r in rows]
 
@@ -116,6 +171,77 @@ def tallas_producto(producto_id: int) -> list[str]:
     if row is None:
         return []
     return json.loads(row["tallas"])
+
+
+# ── Helpers para fotos ──────────────────────────────────────────────────────
+
+def guardar_foto(producto_id: int, datos_bytes: bytes, nombre: str, es_portada: bool = False) -> int:
+    """Inserta una foto; si es_portada=True, quita la portada anterior. Devuelve el id."""
+    with get_connection() as conn:
+        if es_portada:
+            conn.execute(
+                "UPDATE fotos_producto SET es_portada = 0 WHERE producto_id = ?",
+                (producto_id,)
+            )
+        cur = conn.execute(
+            "INSERT INTO fotos_producto (producto_id, datos, nombre, es_portada) VALUES (?, ?, ?, ?)",
+            (producto_id, datos_bytes, nombre, 1 if es_portada else 0)
+        )
+        conn.commit()
+        return cur.lastrowid
+
+
+def get_fotos_producto(producto_id: int) -> list[dict]:
+    """Devuelve todas las fotos de un producto (sin el blob datos) ordenadas portada primero."""
+    with get_connection() as conn:
+        rows = conn.execute(
+            "SELECT id, producto_id, nombre, es_portada, orden "
+            "FROM fotos_producto WHERE producto_id = ? "
+            "ORDER BY es_portada DESC, orden ASC",
+            (producto_id,)
+        ).fetchall()
+    return [dict(r) for r in rows]
+
+
+def get_foto_datos(foto_id: int) -> bytes | None:
+    """Devuelve los bytes raw de una foto."""
+    with get_connection() as conn:
+        row = conn.execute(
+            "SELECT datos FROM fotos_producto WHERE id = ?", (foto_id,)
+        ).fetchone()
+    return row["datos"] if row else None
+
+
+def set_portada(foto_id: int, producto_id: int):
+    """Establece una foto como portada, quitando la anterior."""
+    with get_connection() as conn:
+        conn.execute(
+            "UPDATE fotos_producto SET es_portada = 0 WHERE producto_id = ?",
+            (producto_id,)
+        )
+        conn.execute(
+            "UPDATE fotos_producto SET es_portada = 1 WHERE id = ?",
+            (foto_id,)
+        )
+        conn.commit()
+
+
+def eliminar_foto(foto_id: int):
+    """Elimina una foto por id."""
+    with get_connection() as conn:
+        conn.execute("DELETE FROM fotos_producto WHERE id = ?", (foto_id,))
+        conn.commit()
+
+
+def get_portada(producto_id: int) -> dict | None:
+    """Devuelve la foto portada de un producto (sin datos)."""
+    with get_connection() as conn:
+        row = conn.execute(
+            "SELECT id, producto_id, nombre, es_portada, orden "
+            "FROM fotos_producto WHERE producto_id = ? AND es_portada = 1 LIMIT 1",
+            (producto_id,)
+        ).fetchone()
+    return dict(row) if row else None
 
 
 # ── Helpers para pedidos ────────────────────────────────────────────────────
