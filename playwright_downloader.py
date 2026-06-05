@@ -179,7 +179,14 @@ class YupooPlaywright:
             log.info(f"  [skip] {folder}")
             return
 
-        log.info(f"  Álbum: {title_raw!r} -> {folder!r}")
+        # si la carpeta ya existe con contenido, añadir sufijo numérico
+        base_dir = album_dir
+        n = 2
+        while album_dir.exists() and any(album_dir.iterdir()):
+            album_dir = base_dir.parent / f"{base_dir.name} - {n}"
+            n += 1
+
+        log.info(f"  Álbum: {title_raw!r} -> {album_dir.name!r}")
         album_dir.mkdir(parents=True, exist_ok=True)
 
         # modo solo portadas: entrar al álbum y coger solo la primera imagen
