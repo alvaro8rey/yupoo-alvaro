@@ -111,16 +111,16 @@ class YupooPlaywright:
             album_url = re.sub(r'\?.*$', '', album_url) + "?uid=1"
 
             cover_bytes = None
+            cover_url = None
             if self.covers_only:
-                # la portada es la imagen dentro del enlace del álbum
                 img = await a.query_selector("img")
                 if img:
                     src = await img.get_attribute("src") or ""
                     if src:
-                        full_src = "https:" + src if src.startswith("//") else src
-                        cover_bytes = captured_covers.get(full_src)
+                        cover_url = "https:" + src if src.startswith("//") else src
+                        cover_bytes = captured_covers.get(cover_url)
 
-            albums.append({"title": title, "url": album_url, "cover": cover_bytes})
+            albums.append({"title": title, "url": album_url, "cover": cover_bytes, "cover_url": cover_url})
 
         if self.covers_only:
             page.remove_listener("response", capture_response)
@@ -151,6 +151,24 @@ class YupooPlaywright:
             await human_delay()
         return albums
 
+    async def _fetch_via_browser(self, page: Page, url: str) -> bytes | None:
+        """Descarga una URL de imagen navegando a ella con el browser real."""
+        captured = {}
+        async def on_response(response):
+            if response.url == url:
+                try:
+                    captured["body"] = await response.body()
+                except Exception:
+                    pass
+        page.on("response", on_response)
+        try:
+            await page.goto(url, wait_until="domcontentloaded", timeout=15000)
+            await asyncio.sleep(0.5)
+        except Exception:
+            pass
+        page.remove_listener("response", on_response)
+        return captured.get("body")
+
     async def download_album(self, page: Page, album: dict):
         title_raw = album["title"]
         title_es = translate(title_raw) if self.translate else title_raw
@@ -164,11 +182,21 @@ class YupooPlaywright:
         log.info(f"  Álbum: {title_raw!r} -> {folder!r}")
         album_dir.mkdir(parents=True, exist_ok=True)
 
-        # si la portada ya fue capturada en la página de listado, guardarla directamente
-        if self.covers_only and album.get("cover"):
+        # modo solo portadas: nunca entrar al álbum
+        if self.covers_only:
             path = album_dir / "portada.jpg"
-            await self.save_image(album["cover"], path)
-            log.info(f"    portada guardada: {path.name}")
+            if album.get("cover"):
+                # ya capturada del listado
+                await self.save_image(album["cover"], path)
+            elif album.get("cover_url"):
+                # navegar directamente a la URL de la imagen con el navegador
+                img_bytes = await self._fetch_via_browser(page, album["cover_url"])
+                if img_bytes:
+                    await self.save_image(img_bytes, path)
+                else:
+                    log.warning(f"  No se pudo obtener portada: {title_raw!r}")
+                    album_dir.rmdir()
+            log.info(f"    portada: {path.name}")
             return
 
         captured: dict[str, bytes] = {}
