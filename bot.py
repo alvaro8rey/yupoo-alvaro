@@ -4,6 +4,7 @@ bot.py — Bot de Telegram para la tienda de camisetas.
 
 import json
 import logging
+import re
 from pathlib import Path
 
 from telegram import (
@@ -142,6 +143,77 @@ PERS_LABEL = {
     'nombre_numero_parches': 'Nombre + número + parches',
 }
 PERS_PRECIO = {'sin_personalizacion': None, 'nombre_numero': 21.0, 'solo_parches': 20.0, 'nombre_numero_parches': 24.0}
+
+
+def _parsear_pedido_web(texto: str) -> tuple[list[dict], float]:
+    """Parsea el mensaje pre-rellenado de la tienda y devuelve (items, total)."""
+    items = []
+    total = 0.0
+
+    m = re.search(r'Total estimado[:\s*]+(\d+(?:[\.,]\d+)?)€', texto)
+    if m:
+        try:
+            total = float(m.group(1).replace(',', '.'))
+        except ValueError:
+            pass
+
+    # Cada producto empieza con *N. Nombre*
+    blocks = re.split(r'\*\d+\.\s+', texto)
+    for block in blocks[1:]:
+        lines = block.strip().split('\n')
+        nombre = lines[0].rstrip('*').strip()
+        talla = ''
+        pers = 'sin_personalizacion'
+        nombre_dorsal = ''
+        numero_dorsal = ''
+        precio_item = 18.0
+
+        for line in lines[1:]:
+            limpia = line.strip().lstrip('•').strip()
+            if limpia.startswith('Talla:'):
+                talla = limpia[6:].strip()
+            elif limpia.startswith('Dorsal:'):
+                dorsal = limpia[7:].strip()
+                if '/' in dorsal:
+                    parts = dorsal.split('/', 1)
+                    nombre_dorsal = parts[0].strip()
+                    numero_dorsal = parts[1].strip()
+            elif limpia.startswith('Precio:'):
+                try:
+                    precio_item = float(limpia[7:].replace('€', '').strip())
+                except ValueError:
+                    pass
+            elif limpia.startswith('Parches:'):
+                pers = 'solo_parches'
+                if nombre_dorsal:
+                    pers = 'nombre_numero_parches'
+            elif 'nombre' in limpia.lower() and 'número' in limpia.lower() and 'parches' in limpia.lower():
+                pers = 'nombre_numero_parches'
+            elif 'nombre' in limpia.lower() and 'número' in limpia.lower():
+                pers = 'nombre_numero'
+            elif 'parches' in limpia.lower() and 'sin' not in limpia.lower():
+                if pers == 'sin_personalizacion':
+                    pers = 'solo_parches'
+
+        try:
+            prods = db.get_todos_productos(solo_activos=False)
+            producto = next((p for p in prods if p['nombre'].lower() == nombre.lower()), None)
+        except Exception:
+            producto = None
+
+        items.append({
+            'producto_id':        producto['id'] if producto else 0,
+            'nombre_producto':    nombre,
+            'talla':              talla,
+            'personalizado':      pers != 'sin_personalizacion',
+            'tipo_personalizacion': pers,
+            'nombre_dorsal':      nombre_dorsal,
+            'numero_dorsal':      numero_dorsal,
+            'cantidad':           1,
+            'precio_unitario':    precio_item,
+        })
+
+    return items, total
 
 
 async def _cargar_carrito_web(update: Update, context: ContextTypes.DEFAULT_TYPE, encoded: str) -> int:
@@ -724,7 +796,7 @@ async def recibir_datos_envio(update: Update, context: ContextTypes.DEFAULT_TYPE
     chat_id = update.effective_chat.id
     carrito = get_carrito(chat_id)
     carrito["datos_envio"] = datos
-    total = calcular_total(carrito["items"])
+    total = carrito.get("total_web") or calcular_total(carrito["items"])
 
     pago_txt = f"• PayPal: *paypal.me/{PAYPAL_USER}*\n"
     if BIZUM_NUMERO:
@@ -753,7 +825,8 @@ async def recibir_referencia_pago(update: Update, context: ContextTypes.DEFAULT_
     carrito = get_carrito(chat_id)
     items = carrito["items"]
     datos_envio = carrito.get("datos_envio", "")
-    total = calcular_total(items)
+    total = carrito.get("total_web") or calcular_total(items)
+    notas = context.user_data.get("resumen_web", "")
 
     partes = datos_envio.split(",", 1)
     nombre_cliente = partes[0].strip()
@@ -763,9 +836,11 @@ async def recibir_referencia_pago(update: Update, context: ContextTypes.DEFAULT_
         pedido_id = db.crear_pedido(
             usuario_tg=user.id, username_tg=user.username or "",
             nombre_cliente=nombre_cliente, direccion=direccion,
-            total=total, paypal_ref=ref,
+            total=total, paypal_ref=ref, notas=notas,
         )
         for item in items:
+            if not item.get("producto_id"):
+                continue
             db.agregar_item_pedido(
                 pedido_id=pedido_id, producto_id=item["producto_id"],
                 talla=item["talla"], personalizado=item["personalizado"],
@@ -943,8 +1018,11 @@ async def _notificar_admin(context, pedido_id, user, nombre_cliente, direccion, 
         if it.get("personalizado"):
             parches = " + parches" if it.get("tipo_personalizacion") == "nombre_numero_parches" else ""
             pers = f" ✏️ {it['nombre_dorsal']} #{it['numero_dorsal']}{parches}"
-        producto = db.get_producto_admin(it["producto_id"])
-        yupoo = f"\n    🔗 {producto['yupoo_url']}" if producto and producto.get("yupoo_url") else ""
+        yupoo = ""
+        pid = it.get("producto_id")
+        if pid:
+            producto = db.get_producto_admin(pid)
+            yupoo = f"\n    🔗 {producto['yupoo_url']}" if producto and producto.get("yupoo_url") else ""
         items_txt.append(f"  • {it['nombre_producto']} T:{it['talla']} × {it['cantidad']} — {it['precio_unitario']:.0f}€{pers}{yupoo}")
 
     texto = (
@@ -1234,13 +1312,33 @@ async def recibir_pedido_web(update: Update, context: ContextTypes.DEFAULT_TYPE)
     chat_id = update.effective_chat.id
     texto   = update.message.text or ""
 
-    # Guardamos el resumen completo del pedido para incluirlo en la notificación al admin
+    limpiar_carrito(chat_id)
+    carrito = get_carrito(chat_id)
+
+    items, total = _parsear_pedido_web(texto)
+
+    if not items:
+        await update.message.reply_text(
+            "❌ No pude leer el pedido. Ve a la tienda e inténtalo de nuevo.",
+            reply_markup=MENU_KEYBOARD,
+        )
+        return ConversationHandler.END
+
+    carrito["items"]     = items
+    carrito["total_web"] = total
     context.user_data["resumen_web"] = texto
+
+    lineas = []
+    for it in items:
+        label = PERS_LABEL.get(it['tipo_personalizacion'], it['tipo_personalizacion'])
+        lineas.append(f"• *{it['nombre_producto']}* — Talla {it['talla']}\n  _{label}_ — {it['precio_unitario']:.0f}€")
 
     await update.message.reply_text(
         "✅ *¡Pedido recibido desde la tienda!*\n\n"
-        "Para completar el pedido necesito tu dirección de envío.\n\n"
-        "Por favor escribe tu *nombre completo y dirección* (calle, número, ciudad, código postal):",
+        + "\n\n".join(lineas)
+        + f"\n\n💰 *Total: {total:.0f}€*\n\n"
+        "Escribe tu *nombre completo y dirección de envío*:\n\n"
+        "_Ej: Juan García, Calle Mayor 10 2ºA, 28001 Madrid_",
         parse_mode=ParseMode.MARKDOWN,
         reply_markup=MENU_KEYBOARD,
     )
@@ -1258,6 +1356,7 @@ def main():
     conv = ConversationHandler(
         entry_points=[
             CommandHandler("start", cmd_start),
+            MessageHandler(filters.Regex(r'🛒.*Pedido desde la tienda'), recibir_pedido_web),
         ],
         states={
             ESPERANDO_PRODUCTO_ID: [
@@ -1297,9 +1396,6 @@ def main():
     )
 
     application.add_handler(conv)
-
-    # Pedido desde la tienda web (mensaje de texto pre-rellenado)
-    application.add_handler(MessageHandler(filters.Regex(r"^🛒 \*?Pedido desde la tienda"), recibir_pedido_web))
 
     # Menú botones
     application.add_handler(MessageHandler(filters.Regex("^🛍 Catálogo$"), menu_catalogo))
