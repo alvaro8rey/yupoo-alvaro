@@ -1229,6 +1229,24 @@ async def mensaje_inesperado(update: Update, context: ContextTypes.DEFAULT_TYPE)
     )
 
 
+async def recibir_pedido_web(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    """Recibe el mensaje pre-rellenado desde la tienda web y pide dirección de envío."""
+    chat_id = update.effective_chat.id
+    texto   = update.message.text or ""
+
+    # Guardamos el resumen completo del pedido para incluirlo en la notificación al admin
+    context.user_data["resumen_web"] = texto
+
+    await update.message.reply_text(
+        "✅ *¡Pedido recibido desde la tienda!*\n\n"
+        "Para completar el pedido necesito tu dirección de envío.\n\n"
+        "Por favor escribe tu *nombre completo y dirección* (calle, número, ciudad, código postal):",
+        parse_mode=ParseMode.MARKDOWN,
+        reply_markup=MENU_KEYBOARD,
+    )
+    return ESPERANDO_DATOS_ENVIO
+
+
 # ── Main ──────────────────────────────────────────────────────────────────────
 
 def main():
@@ -1279,6 +1297,9 @@ def main():
     )
 
     application.add_handler(conv)
+
+    # Pedido desde la tienda web (mensaje de texto pre-rellenado)
+    application.add_handler(MessageHandler(filters.Regex(r"^🛒 \*?Pedido desde la tienda"), recibir_pedido_web))
 
     # Menú botones
     application.add_handler(MessageHandler(filters.Regex("^🛍 Catálogo$"), menu_catalogo))

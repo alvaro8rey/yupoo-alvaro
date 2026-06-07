@@ -1213,6 +1213,62 @@ img {
   flex-shrink: 0;
 }
 
+/* ── Dorsal inputs ────────────────────────────────────────────────────────── */
+.dorsal-inputs {
+  display: flex;
+  gap: .5rem;
+}
+.dorsal-input {
+  flex: 1;
+  padding: .55rem .7rem;
+  border: 1.5px solid var(--border);
+  border-radius: 8px;
+  font-size: .85rem;
+  color: var(--text);
+  background: var(--white);
+  transition: border-color .15s;
+  font-family: inherit;
+}
+.dorsal-input:focus {
+  outline: none;
+  border-color: var(--blue-dark);
+  box-shadow: 0 0 0 3px rgba(30,64,175,.08);
+}
+.dorsal-input--num {
+  flex: 0 0 72px;
+  text-align: center;
+  font-weight: 700;
+  font-size: 1rem;
+}
+
+/* ── Parche pills ─────────────────────────────────────────────────────────── */
+.parche-pills {
+  display: flex;
+  flex-wrap: wrap;
+  gap: .4rem;
+}
+.parche-pill {
+  display: flex;
+  align-items: center;
+  gap: .3rem;
+  padding: .35rem .7rem;
+  border: 1.5px solid var(--border);
+  border-radius: 20px;
+  background: var(--white);
+  color: var(--text);
+  font-size: .78rem;
+  font-weight: 500;
+  cursor: pointer;
+  transition: border-color .15s, background .15s, color .15s;
+}
+.parche-pill:hover { border-color: var(--blue); }
+.parche-pill.active {
+  border-color: var(--blue-dark);
+  background: var(--blue-dark);
+  color: white;
+  font-weight: 600;
+}
+
 /* ── Botón añadir al carrito ──────────────────────────────────────────────── */
 .btn-add-cart {
   display: flex;

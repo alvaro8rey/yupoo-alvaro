@@ -1,32 +1,65 @@
 import React, { useState, useEffect, useCallback } from 'react';
 
-const PRECIO_BASE            = 18;
-const PRECIO_DORSAL          = 21;
-const PRECIO_SOLO_PARCHES    = 20;
+const PRECIO_BASE             = 18;
+const PRECIO_DORSAL           = 21;
+const PRECIO_SOLO_PARCHES     = 20;
 const PRECIO_PARCHES_COMPLETO = 24;
 
 const PERS_OPTIONS = [
-  { key: 'sin_personalizacion',      label: 'Sin personalización',        sub: 'Camiseta tal cual',                       precio: (base) => base },
-  { key: 'nombre_numero',            label: 'Nombre + número',            sub: 'Dorsal personalizado impreso',            precio: () => PRECIO_DORSAL },
-  { key: 'solo_parches',             label: 'Solo parches',               sub: 'Liga, Champions… sin dorsal',             precio: () => PRECIO_SOLO_PARCHES },
-  { key: 'nombre_numero_parches',    label: 'Nombre + número + parches',  sub: 'Dorsal + Liga, Champions, Mundial…',      precio: () => PRECIO_PARCHES_COMPLETO },
+  { key: 'sin_personalizacion',   label: 'Sin personalización',       sub: 'Camiseta tal cual',                  precio: (base) => base },
+  { key: 'nombre_numero',         label: 'Nombre + número',           sub: 'Dorsal personalizado impreso',       precio: () => PRECIO_DORSAL },
+  { key: 'solo_parches',          label: 'Solo parches',              sub: 'Liga, Champions… sin dorsal',        precio: () => PRECIO_SOLO_PARCHES },
+  { key: 'nombre_numero_parches', label: 'Nombre + número + parches', sub: 'Dorsal + parches',                   precio: () => PRECIO_PARCHES_COMPLETO },
 ];
+
+const PATCHES_BY_LIGA = {
+  'La Liga':        ['La Liga', 'Champions League', 'Europa League', 'Conference League'],
+  'Premier League': ['Premier League', 'Champions League', 'Europa League', 'Conference League'],
+  'Bundesliga':     ['Bundesliga', 'Champions League', 'Europa League'],
+  'Serie A':        ['Serie A', 'Champions League', 'Europa League', 'Conference League'],
+  'Ligue 1':        ['Ligue 1', 'Champions League', 'Europa League'],
+  'Selecciones':    ['Mundial 2026', 'Copa América', 'Eurocopa'],
+  'Mundial 2026':   ['Mundial 2026'],
+};
+const DEFAULT_PATCHES = ['Champions League', 'Europa League', 'Conference League'];
+
+function getPatchOptions(liga) {
+  return PATCHES_BY_LIGA[liga] || DEFAULT_PATCHES;
+}
+
+const needsDorsal  = (p) => p === 'nombre_numero' || p === 'nombre_numero_parches';
+const needsParches = (p) => p === 'solo_parches'  || p === 'nombre_numero_parches';
 
 export default function ProductDetail({ product, onClose, onAddToCart }) {
   const fotos  = product.fotos?.length ? product.fotos : (product.foto_path ? [product.foto_path] : []);
   const tallas = Array.isArray(product.tallas) ? product.tallas : [];
+  const patchOptions = getPatchOptions(product.liga);
 
-  const [activeIdx, setActiveIdx] = useState(0);
-  const [imgError,  setImgError]  = useState({});
-  const [lightbox,  setLightbox]  = useState(false);
-  const [talla,     setTalla]     = useState(tallas[0] || '');
-  const [pers,      setPers]      = useState('sin_personalizacion');
-  const [added,     setAdded]     = useState(false);
+  const [activeIdx,    setActiveIdx]    = useState(0);
+  const [imgError,     setImgError]     = useState({});
+  const [lightbox,     setLightbox]     = useState(false);
+  const [talla,        setTalla]        = useState(tallas[0] || '');
+  const [pers,         setPers]         = useState('sin_personalizacion');
+  const [nombreDorsal, setNombreDorsal] = useState('');
+  const [numeroDorsal, setNumeroDorsal] = useState('');
+  const [parches,      setParches]      = useState([]);
+  const [added,        setAdded]        = useState(false);
 
   useEffect(() => {
     setActiveIdx(0); setImgError({}); setLightbox(false);
-    setTalla(tallas[0] || ''); setPers('sin_personalizacion'); setAdded(false);
+    setTalla(tallas[0] || ''); setPers('sin_personalizacion');
+    setNombreDorsal(''); setNumeroDorsal(''); setParches([]); setAdded(false);
   }, [product.id]);
+
+  // Reset dorsal/parches when pers changes
+  useEffect(() => {
+    if (!needsDorsal(pers))  { setNombreDorsal(''); setNumeroDorsal(''); }
+    if (!needsParches(pers)) { setParches([]); }
+  }, [pers]);
+
+  const toggleParche = (p) => setParches(prev =>
+    prev.includes(p) ? prev.filter(x => x !== p) : [...prev, p]
+  );
 
   const prev = useCallback(() => setActiveIdx(i => (i - 1 + fotos.length) % fotos.length), [fotos.length]);
   const next = useCallback(() => setActiveIdx(i => (i + 1) % fotos.length), [fotos.length]);
@@ -46,14 +79,20 @@ export default function ProductDetail({ product, onClose, onAddToCart }) {
   const handleImgError = (src) => setImgError(prev => ({ ...prev, [src]: true }));
   const precioActual = PERS_OPTIONS.find(o => o.key === pers)?.precio(product.precio ?? PRECIO_BASE) ?? (product.precio ?? PRECIO_BASE);
 
+  const canAdd = talla && (!needsDorsal(pers) || (nombreDorsal.trim() && numeroDorsal.trim()));
+
   const handleAddToCart = () => {
-    if (!talla) return;
+    if (!canAdd) return;
     onAddToCart({
       cartId:          Date.now() + Math.random(),
       producto_id:     product.id,
       nombre:          product.nombre,
+      liga:            product.liga || '',
       talla,
       personalizacion: pers,
+      nombre_dorsal:   nombreDorsal.trim(),
+      numero_dorsal:   numeroDorsal.trim(),
+      parches,
       precio:          precioActual,
       portada_url:     fotos[0] || '',
     });
@@ -120,7 +159,6 @@ export default function ProductDetail({ product, onClose, onAddToCart }) {
                 )}
               </div>
 
-              {/* Precio dinámico */}
               <div className="price-hero">
                 <span className="price-hero-value">{precioActual}€</span>
                 <span className="price-hero-note">IVA incluido · envío a toda España</span>
@@ -163,6 +201,55 @@ export default function ProductDetail({ product, onClose, onAddToCart }) {
                 </div>
               </div>
 
+              {/* Inputs dorsal */}
+              {needsDorsal(pers) && (
+                <div className="selector-section">
+                  <p className="selector-label">Datos del dorsal <span style={{color:'#e53e3e'}}>*</span></p>
+                  <div className="dorsal-inputs">
+                    <input
+                      type="text"
+                      placeholder="Nombre (ej. RONALDO)"
+                      value={nombreDorsal}
+                      onChange={e => setNombreDorsal(e.target.value.toUpperCase())}
+                      maxLength={20}
+                      className="dorsal-input"
+                    />
+                    <input
+                      type="text"
+                      placeholder="Número (ej. 7)"
+                      value={numeroDorsal}
+                      onChange={e => setNumeroDorsal(e.target.value.replace(/\D/g, '').slice(0,2))}
+                      maxLength={2}
+                      className="dorsal-input dorsal-input--num"
+                    />
+                  </div>
+                </div>
+              )}
+
+              {/* Selector de parches */}
+              {needsParches(pers) && (
+                <div className="selector-section">
+                  <p className="selector-label">Parches disponibles</p>
+                  <div className="parche-pills">
+                    {patchOptions.map(p => (
+                      <button key={p}
+                        className={`parche-pill${parches.includes(p) ? ' active' : ''}`}
+                        onClick={() => toggleParche(p)}>
+                        {parches.includes(p) && (
+                          <svg viewBox="0 0 12 12" width="9" height="9" style={{flexShrink:0}}>
+                            <polyline points="1,6 4,9 11,2" fill="none" stroke="white" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round"/>
+                          </svg>
+                        )}
+                        {p}
+                      </button>
+                    ))}
+                  </div>
+                  {parches.length === 0 && (
+                    <p style={{fontSize:'.72rem',color:'var(--text-muted)',marginTop:'.3rem'}}>Selecciona los parches que quieres añadir</p>
+                  )}
+                </div>
+              )}
+
               {/* Info cards */}
               <div className="info-cards">
                 <div className="info-card"><span className="info-card-icon">🚚</span>
@@ -171,19 +258,13 @@ export default function ProductDetail({ product, onClose, onAddToCart }) {
                 <div className="info-card"><span className="info-card-icon">💳</span>
                   <div><p className="info-card-title">PayPal / Bizum</p><p className="info-card-text">Pago seguro</p></div>
                 </div>
-                <div className="info-card"><span className="info-card-icon">📦</span>
-                  <div><p className="info-card-title">Alta calidad</p><p className="info-card-text">Réplica premium</p></div>
-                </div>
-                <div className="info-card"><span className="info-card-icon">✏️</span>
-                  <div><p className="info-card-title">Personalización</p><p className="info-card-text">Dorsal a tu elección</p></div>
-                </div>
               </div>
 
               {/* Botón añadir al carrito */}
               <button
-                className={`btn-add-cart${added ? ' added' : ''}${!talla ? ' disabled' : ''}`}
+                className={`btn-add-cart${added ? ' added' : ''}${!canAdd ? ' disabled' : ''}`}
                 onClick={handleAddToCart}
-                disabled={!talla}
+                disabled={!canAdd}
               >
                 {added ? (
                   <>
@@ -198,7 +279,7 @@ export default function ProductDetail({ product, onClose, onAddToCart }) {
                       <circle cx="9" cy="21" r="1"/><circle cx="20" cy="21" r="1"/>
                       <path d="M1 1h4l2.68 13.39a2 2 0 0 0 2 1.61h9.72a2 2 0 0 0 2-1.61L23 6H6"/>
                     </svg>
-                    {!talla ? 'Elige una talla' : 'Añadir al carrito'}
+                    {!talla ? 'Elige una talla' : needsDorsal(pers) && (!nombreDorsal.trim() || !numeroDorsal.trim()) ? 'Añade nombre y número' : 'Añadir al carrito'}
                   </>
                 )}
               </button>

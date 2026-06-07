@@ -8,17 +8,36 @@ const PERS_LABEL = {
   solo_parches:          'Solo parches',
   nombre_numero_parches: 'Nombre + número + parches',
 };
-const PERS_CODE = { sin_personalizacion: 0, nombre_numero: 1, solo_parches: 2, nombre_numero_parches: 3 };
+
+function formatTelegramText(cart) {
+  const lines = ['🛒 *Pedido desde la tienda*', ''];
+  cart.forEach((item, i) => {
+    lines.push(`*${i + 1}. ${item.nombre}*`);
+    lines.push(`   • Talla: ${item.talla}`);
+    lines.push(`   • ${PERS_LABEL[item.personalizacion]}`);
+    if (item.nombre_dorsal || item.numero_dorsal) {
+      lines.push(`   • Dorsal: ${item.nombre_dorsal} / ${item.numero_dorsal}`);
+    }
+    if (item.parches?.length) {
+      lines.push(`   • Parches: ${item.parches.join(', ')}`);
+    }
+    lines.push(`   • Precio: ${item.precio}€`);
+    lines.push('');
+  });
+  const total = cart.reduce((s, i) => s + i.precio, 0);
+  lines.push(`💰 *Total estimado: ${total}€*`);
+  lines.push('');
+  lines.push('_(Envíame este mensaje para continuar con el pedido)_');
+  return lines.join('\n');
+}
 
 export default function Cart({ cart, onRemove, onClose }) {
   const total = cart.reduce((s, i) => s + i.precio, 0);
 
   const handleCheckout = () => {
     if (!cart.length) return;
-    const encoded = cart
-      .map(i => `${i.producto_id}-${i.talla.toLowerCase()}-${PERS_CODE[i.personalizacion]}`)
-      .join('_');
-    const url = `https://t.me/${BOT_USERNAME}?start=cart_${encoded}`;
+    const text = formatTelegramText(cart);
+    const url  = `https://t.me/${BOT_USERNAME}?text=${encodeURIComponent(text)}`;
     window.open(url, '_blank', 'noopener,noreferrer');
   };
 
@@ -62,6 +81,12 @@ export default function Cart({ cart, onRemove, onClose }) {
                     <p className="cart-item-name">{item.nombre}</p>
                     <p className="cart-item-meta">Talla: <strong>{item.talla}</strong></p>
                     <p className="cart-item-meta">{PERS_LABEL[item.personalizacion]}</p>
+                    {(item.nombre_dorsal || item.numero_dorsal) && (
+                      <p className="cart-item-meta">👕 {item.nombre_dorsal} / {item.numero_dorsal}</p>
+                    )}
+                    {item.parches?.length > 0 && (
+                      <p className="cart-item-meta">🏆 {item.parches.join(', ')}</p>
+                    )}
                     <p className="cart-item-price">{item.precio}€</p>
                   </div>
                   <button className="cart-item-remove" onClick={() => onRemove(item.cartId)} aria-label="Eliminar">
