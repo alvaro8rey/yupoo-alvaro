@@ -150,7 +150,7 @@ def get_todos_productos(solo_activos: bool = True) -> list[dict]:
         if solo_activos:
             c.execute("""
                 SELECT p.id, p.nombre, p.precio, p.foto_path, p.yupoo_url,
-                       p.tallas, p.activo,
+                       p.tallas, p.activo, COALESCE(p.parches,'[]') AS parches,
                        COALESCE(p.liga,'') AS liga, COALESCE(p.equipo,'') AS equipo,
                        fp.id AS portada_id
                 FROM productos p
@@ -162,7 +162,7 @@ def get_todos_productos(solo_activos: bool = True) -> list[dict]:
         else:
             c.execute("""
                 SELECT p.id, p.nombre, p.precio, p.foto_path, p.yupoo_url,
-                       p.tallas, p.activo,
+                       p.tallas, p.activo, COALESCE(p.parches,'[]') AS parches,
                        COALESCE(p.liga,'') AS liga, COALESCE(p.equipo,'') AS equipo,
                        fp.id AS portada_id
                 FROM productos p
