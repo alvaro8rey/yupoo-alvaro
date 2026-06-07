@@ -79,26 +79,23 @@ const MundialLogo = () => (
 );
 
 const LEAGUE_LOGO_COMPONENTS = {
-  'La Liga':        LaLigaLogo,
-  'Premier League': PremierLogo,
-  'Bundesliga':     BundesligaLogo,
-  'Serie A':        SerieALogo,
-  'Ligue 1':        Ligue1Logo,
-  'Selecciones':    SeleccionesLogo,
-  'Mundial 2026':   MundialLogo,
-};
-
-const LEAGUE_EMOJI_FALLBACK = {
-  'La Liga': '🇪🇸', 'Premier League': '🏴󠁧󠁢󠁥󠁮󠁧󠁿', 'Bundesliga': '🇩🇪',
-  'Serie A': '🇮🇹', 'Ligue 1': '🇫🇷', 'Selecciones': '🌍', 'Mundial 2026': '🏆',
+  'la liga':        LaLigaLogo,
+  'premier league': PremierLogo,
+  'bundesliga':     BundesligaLogo,
+  'serie a':        SerieALogo,
+  'ligue 1':        Ligue1Logo,
+  'selecciones':    SeleccionesLogo,
+  'mundial 2026':   MundialLogo,
+  'mundial':        MundialLogo,
 };
 
 function LeagueIcon({ liga }) {
-  const Logo = LEAGUE_LOGO_COMPONENTS[liga];
+  const key = (liga || '').toLowerCase().trim();
+  const Logo = LEAGUE_LOGO_COMPONENTS[key];
   if (Logo) {
     return <span className="league-icon"><Logo /></span>;
   }
-  return <span className="league-icon">{LEAGUE_EMOJI_FALLBACK[liga] || '⚽'}</span>;
+  return <span className="league-icon">⚽</span>;
 }
 
 export default function Sidebar({ leagueTree, filter, onSelect, isOpen }) {
