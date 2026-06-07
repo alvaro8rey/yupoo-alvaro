@@ -76,12 +76,23 @@ def init_db():
                 talla                TEXT    NOT NULL DEFAULT '',
                 personalizado        INTEGER NOT NULL DEFAULT 0,
                 tipo_personalizacion TEXT    NOT NULL DEFAULT 'sin_personalizacion'
-                                     CHECK(tipo_personalizacion IN ('sin_personalizacion','nombre_numero','nombre_numero_parches')),
+                                     CHECK(tipo_personalizacion IN ('sin_personalizacion','nombre_numero','solo_parches','nombre_numero_parches')),
                 nombre_dorsal        TEXT    NOT NULL DEFAULT '',
                 numero_dorsal        TEXT    NOT NULL DEFAULT '',
                 cantidad             INTEGER NOT NULL DEFAULT 1,
                 precio_unitario      FLOAT   NOT NULL DEFAULT 0.0
             )
+        """)
+
+        # Ampliar el CHECK constraint para incluir 'solo_parches'
+        c.execute("""
+            DO $$
+            BEGIN
+                ALTER TABLE pedido_items DROP CONSTRAINT IF EXISTS pedido_items_tipo_personalizacion_check;
+                ALTER TABLE pedido_items ADD CONSTRAINT pedido_items_tipo_personalizacion_check
+                    CHECK(tipo_personalizacion IN ('sin_personalizacion','nombre_numero','solo_parches','nombre_numero_parches'));
+            EXCEPTION WHEN others THEN NULL;
+            END$$
         """)
 
         c.execute("""
