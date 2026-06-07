@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 
 const LEAGUE_LOGOS = {
-  'La Liga':        '/logos/laliga.svg',
+  'La Liga':        '/logos/laliga.png',
   'Premier League': '/logos/premier-league.svg',
   'Bundesliga':     '/logos/bundesliga.svg',
   'Serie A':        '/logos/serie-a.svg',
