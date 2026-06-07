@@ -7,7 +7,7 @@ const LEAGUE_LOGOS = {
   'Serie A':        '/logos/serie-a.svg',
   'Ligue 1':        '/logos/ligue-1.svg',
   'Selecciones':    '/logos/selecciones.svg',
-  'Mundial 2026':   '/logos/mundial.svg',
+  'Mundial 2026':   '/logos/mundial.png',
 };
 
 const LEAGUE_EMOJI_FALLBACK = {

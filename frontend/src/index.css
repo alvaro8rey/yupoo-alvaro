@@ -423,7 +423,7 @@ img {
 
 .card-image-wrap {
   position: relative;
-  padding-top: 100%;
+  padding-top: 130%;
   background: var(--gray-100);
   overflow: hidden;
 }
