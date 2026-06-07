@@ -16,16 +16,17 @@ const LEAGUE_EMOJI_FALLBACK = {
 };
 
 function LeagueIcon({ liga }) {
+  const [failed, setFailed] = React.useState(false);
   const src = LEAGUE_LOGOS[liga];
-  if (src) {
-    return (
-      <span className="league-icon">
-        <img src={src} alt={liga} onError={e => { e.target.style.display='none'; e.target.nextSibling.style.display='inline'; }} />
-        <span style={{display:'none'}}>{LEAGUE_EMOJI_FALLBACK[liga] || '⚽'}</span>
-      </span>
-    );
+  const fallback = LEAGUE_EMOJI_FALLBACK[liga] || '⚽';
+  if (!src || failed) {
+    return <span className="league-icon">{fallback}</span>;
   }
-  return <span className="league-icon">{LEAGUE_EMOJI_FALLBACK[liga] || '⚽'}</span>;
+  return (
+    <span className="league-icon">
+      <img src={src} alt={liga} onError={() => setFailed(true)} />
+    </span>
+  );
 }
 
 export default function Sidebar({ leagueTree, filter, onSelect, isOpen }) {
