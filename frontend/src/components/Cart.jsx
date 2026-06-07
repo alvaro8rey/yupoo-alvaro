@@ -3,11 +3,12 @@ import React from 'react';
 const BOT_USERNAME = "camisetasgalbot";
 
 const PERS_LABEL = {
-  sin_personalizacion:      'Sin personalización',
-  nombre_numero:            'Nombre + número',
-  nombre_numero_parches:    'Nombre + número + parches',
+  sin_personalizacion:   'Sin personalización',
+  nombre_numero:         'Nombre + número',
+  solo_parches:          'Solo parches',
+  nombre_numero_parches: 'Nombre + número + parches',
 };
-const PERS_CODE = { sin_personalizacion: 0, nombre_numero: 1, nombre_numero_parches: 2 };
+const PERS_CODE = { sin_personalizacion: 0, nombre_numero: 1, solo_parches: 2, nombre_numero_parches: 3 };
 
 export default function Cart({ cart, onRemove, onClose }) {
   const total = cart.reduce((s, i) => s + i.precio, 0);

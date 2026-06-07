@@ -1,13 +1,15 @@
 import React, { useState, useEffect, useCallback } from 'react';
 
-const PRECIO_BASE    = 18;
-const PRECIO_DORSAL  = 21;
-const PRECIO_PARCHES = 22;
+const PRECIO_BASE            = 18;
+const PRECIO_DORSAL          = 21;
+const PRECIO_SOLO_PARCHES    = 20;
+const PRECIO_PARCHES_COMPLETO = 24;
 
 const PERS_OPTIONS = [
-  { key: 'sin_personalizacion',   label: 'Sin personalización',     sub: 'Camiseta tal cual',            precio: (base) => base },
-  { key: 'nombre_numero',         label: 'Nombre + número',         sub: 'Dorsal personalizado impreso', precio: () => PRECIO_DORSAL },
-  { key: 'nombre_numero_parches', label: 'Con parches',             sub: 'Liga, Champions, Mundial…',    precio: () => PRECIO_PARCHES },
+  { key: 'sin_personalizacion',      label: 'Sin personalización',        sub: 'Camiseta tal cual',                       precio: (base) => base },
+  { key: 'nombre_numero',            label: 'Nombre + número',            sub: 'Dorsal personalizado impreso',            precio: () => PRECIO_DORSAL },
+  { key: 'solo_parches',             label: 'Solo parches',               sub: 'Liga, Champions… sin dorsal',             precio: () => PRECIO_SOLO_PARCHES },
+  { key: 'nombre_numero_parches',    label: 'Nombre + número + parches',  sub: 'Dorsal + Liga, Champions, Mundial…',      precio: () => PRECIO_PARCHES_COMPLETO },
 ];
 
 export default function ProductDetail({ product, onClose, onAddToCart }) {

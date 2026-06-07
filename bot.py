@@ -134,13 +134,14 @@ def texto_producto(p: dict) -> str:
 
 
 TALLA_MAP = {'s':'S','m':'M','l':'L','xl':'XL','xxl':'XXL','xxxl':'XXXL'}
-PERS_MAP  = {'0':'sin_personalizacion','1':'nombre_numero','2':'nombre_numero_parches'}
+PERS_MAP  = {'0':'sin_personalizacion','1':'nombre_numero','2':'solo_parches','3':'nombre_numero_parches'}
 PERS_LABEL = {
     'sin_personalizacion':   'Sin personalización',
     'nombre_numero':         'Nombre + número',
+    'solo_parches':          'Solo parches',
     'nombre_numero_parches': 'Nombre + número + parches',
 }
-PERS_PRECIO = {'sin_personalizacion': None, 'nombre_numero': 21.0, 'nombre_numero_parches': 22.0}
+PERS_PRECIO = {'sin_personalizacion': None, 'nombre_numero': 21.0, 'solo_parches': 20.0, 'nombre_numero_parches': 24.0}
 
 
 async def _cargar_carrito_web(update: Update, context: ContextTypes.DEFAULT_TYPE, encoded: str) -> int:
