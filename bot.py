@@ -133,6 +133,75 @@ def texto_producto(p: dict) -> str:
     )
 
 
+TALLA_MAP = {'s':'S','m':'M','l':'L','xl':'XL','xxl':'XXL','xxxl':'XXXL'}
+PERS_MAP  = {'0':'sin_personalizacion','1':'nombre_numero','2':'nombre_numero_parches'}
+PERS_LABEL = {
+    'sin_personalizacion':   'Sin personalización',
+    'nombre_numero':         'Nombre + número',
+    'nombre_numero_parches': 'Nombre + número + parches',
+}
+PERS_PRECIO = {'sin_personalizacion': None, 'nombre_numero': 21.0, 'nombre_numero_parches': 22.0}
+
+
+async def _cargar_carrito_web(update: Update, context: ContextTypes.DEFAULT_TYPE, encoded: str) -> int:
+    """Carga un carrito enviado desde la tienda web y lo mete en el carrito del bot."""
+    chat_id = update.effective_chat.id
+    user    = update.effective_user
+    limpiar_carrito(chat_id)
+    carrito = get_carrito(chat_id)
+
+    items_ok = []
+    for part in encoded.split('_'):
+        fields = part.split('-', 2)
+        if len(fields) != 3:
+            continue
+        try:
+            pid   = int(fields[0])
+            talla = TALLA_MAP.get(fields[1].lower(), fields[1].upper())
+            pers  = PERS_MAP.get(fields[2], 'sin_personalizacion')
+        except ValueError:
+            continue
+        producto = db.get_producto(pid)
+        if not producto:
+            continue
+        precio_base = producto.get('precio') or PRECIO_BASE
+        precio = PERS_PRECIO.get(pers) or precio_base
+        items_ok.append({
+            "producto":     producto,
+            "talla":        talla,
+            "personalizacion": pers,
+            "precio":       precio,
+            "cantidad":     1,
+        })
+
+    if not items_ok:
+        await update.message.reply_text(
+            "❌ No se pudo cargar el carrito. Inténtalo de nuevo desde la tienda.",
+            reply_markup=MENU_KEYBOARD,
+        )
+        return ConversationHandler.END
+
+    carrito["items"] = items_ok
+
+    # Resumen
+    lineas = []
+    total  = 0.0
+    for it in items_ok:
+        p    = it["producto"]
+        desc = PERS_LABEL[it["personalizacion"]]
+        lineas.append(f"• *{p['nombre']}* — Talla {it['talla']}\n  _{desc}_ — {it['precio']:.0f}€")
+        total += it["precio"]
+
+    texto = (
+        f"🛒 *Carrito importado desde la tienda*\n\n"
+        + "\n\n".join(lineas)
+        + f"\n\n*Total estimado: {total:.0f}€*\n\n"
+        "¿Quieres finalizar el pedido? Introduce tu nombre completo y dirección de envío:"
+    )
+    await update.message.reply_text(texto, parse_mode=ParseMode.MARKDOWN, reply_markup=MENU_KEYBOARD)
+    return ESPERANDO_DATOS_ENVIO
+
+
 # ── /start ────────────────────────────────────────────────────────────────────
 
 async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
@@ -141,22 +210,30 @@ async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     user = update.effective_user
     limpiar_carrito(chat_id)
 
-    # deep link producto
+    # deep link
     args = context.args or []
-    if args and args[0].startswith("producto_"):
-        try:
-            pid = int(args[0].split("_", 1)[1])
-            producto = db.get_producto(pid)
-            if producto:
-                get_carrito(chat_id)["producto_actual"] = producto
-                await update.message.reply_text(
-                    f"👋 Hola, *{user.first_name}*! Te enviamos directamente a este producto:",
-                    parse_mode=ParseMode.MARKDOWN,
-                    reply_markup=MENU_KEYBOARD,
-                )
-                return await _mostrar_producto_y_confirmar(update, context, producto)
-        except (ValueError, IndexError):
-            pass
+    if args:
+        payload = args[0]
+
+        # Carrito desde la web: cart_ID-TALLA-PERS_ID-TALLA-PERS
+        if payload.startswith("cart_"):
+            return await _cargar_carrito_web(update, context, payload[5:])
+
+        # Producto individual
+        if payload.startswith("producto_"):
+            try:
+                pid = int(payload.split("_", 1)[1])
+                producto = db.get_producto(pid)
+                if producto:
+                    get_carrito(chat_id)["producto_actual"] = producto
+                    await update.message.reply_text(
+                        f"👋 Hola, *{user.first_name}*! Te enviamos directamente a este producto:",
+                        parse_mode=ParseMode.MARKDOWN,
+                        reply_markup=MENU_KEYBOARD,
+                    )
+                    return await _mostrar_producto_y_confirmar(update, context, producto)
+            except (ValueError, IndexError):
+                pass
 
     productos = db.get_todos_productos(solo_activos=True)
     n = len(productos)

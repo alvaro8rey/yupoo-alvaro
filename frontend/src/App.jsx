@@ -2,6 +2,7 @@ import React, { useState, useEffect, useMemo, useCallback } from 'react';
 import Sidebar from './components/Sidebar.jsx';
 import ProductGrid from './components/ProductGrid.jsx';
 import ProductDetail from './components/ProductDetail.jsx';
+import Cart from './components/Cart.jsx';
 
 // ── Config ────────────────────────────────────────────────────────────────────
 const BOT_USERNAME = "camisetasgalbot";
@@ -20,6 +21,17 @@ export default function App() {
 
   const [selectedProduct, setSelectedProduct] = useState(null);
   const [sidebarOpen, setSidebarOpen] = useState(false);
+  const [cart, setCart] = useState([]);
+  const [cartOpen, setCartOpen] = useState(false);
+
+  const addToCart = useCallback((item) => {
+    setCart(prev => [...prev, item]);
+    setCartOpen(true);
+    setSelectedProduct(null);
+  }, []);
+  const removeFromCart = useCallback((cartId) => {
+    setCart(prev => prev.filter(i => i.cartId !== cartId));
+  }, []);
 
   // Load data
   useEffect(() => {
@@ -130,6 +142,15 @@ export default function App() {
           </span>
         </div>
 
+        {/* ── Carrito icon ── */}
+        <button className="cart-icon-btn" onClick={() => setCartOpen(true)} aria-label="Ver carrito">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" width="22" height="22">
+            <circle cx="9" cy="21" r="1"/><circle cx="20" cy="21" r="1"/>
+            <path d="M1 1h4l2.68 13.39a2 2 0 0 0 2 1.61h9.72a2 2 0 0 0 2-1.61L23 6H6"/>
+          </svg>
+          {cart.length > 0 && <span className="cart-badge">{cart.length}</span>}
+        </button>
+
         <div className="header-search">
           <svg className="header-search-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
             <circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/>
@@ -206,8 +227,17 @@ export default function App() {
       {selectedProduct && (
         <ProductDetail
           product={selectedProduct}
-          botUsername={BOT_USERNAME}
           onClose={() => setSelectedProduct(null)}
+          onAddToCart={addToCart}
+        />
+      )}
+
+      {/* ── Cart panel ── */}
+      {cartOpen && (
+        <Cart
+          cart={cart}
+          onRemove={removeFromCart}
+          onClose={() => setCartOpen(false)}
         />
       )}
     </div>
