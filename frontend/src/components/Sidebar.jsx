@@ -65,18 +65,7 @@ const SeleccionesLogo = () => (
   </svg>
 );
 
-const MundialLogo = () => (
-  <svg viewBox="0 0 100 100" xmlns="http://www.w3.org/2000/svg">
-    <rect width="100" height="100" rx="14" fill="#0a1628"/>
-    <path d="M35,16 L65,16 L61,46 Q59,60 50,64 Q41,60 39,46 Z" fill="#f5c518"/>
-    <path d="M35,18 Q24,18 24,32 Q24,44 35,44" stroke="#f5c518" strokeWidth="4" fill="none" strokeLinecap="round"/>
-    <path d="M65,18 Q76,18 76,32 Q76,44 65,44" stroke="#f5c518" strokeWidth="4" fill="none" strokeLinecap="round"/>
-    <rect x="43" y="64" width="14" height="8" rx="1" fill="#f5c518"/>
-    <rect x="37" y="72" width="26" height="5" rx="2" fill="#f5c518"/>
-    <path d="M38,20 Q41,26 41,36" stroke="white" strokeWidth="1.5" fill="none" strokeLinecap="round" opacity="0.35"/>
-    <text x="50" y="94" fontFamily="Arial Black,sans-serif" fontSize="10" fontWeight="900" fill="#f5c518" textAnchor="middle" letterSpacing="0.5">2026</text>
-  </svg>
-);
+const MundialLogo = () => <img src="/logos/mundial.png" alt="Mundial 2026" style={{width:'100%',height:'100%',objectFit:'contain'}} />;
 
 const LEAGUE_LOGO_COMPONENTS = {
   'la liga':        LaLigaLogo,
