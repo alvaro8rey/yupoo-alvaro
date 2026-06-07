@@ -59,6 +59,7 @@ logger = logging.getLogger(__name__)
 
 # ── Carrito en memoria ───────────────────────────────────────────────────────
 carritos: dict[int, dict] = {}
+correcciones_pendientes: dict[int, dict] = {}  # chat_id -> {tipo, pedido_id}
 
 def get_carrito(chat_id: int) -> dict:
     if chat_id not in carritos:
@@ -143,6 +144,59 @@ PERS_LABEL = {
     'nombre_numero_parches': 'Nombre + número + parches',
 }
 PERS_PRECIO = {'sin_personalizacion': None, 'nombre_numero': 21.0, 'solo_parches': 20.0, 'nombre_numero_parches': 24.0}
+
+
+class _EsperandoCorreccionFilter(filters.MessageFilter):
+    def filter(self, message):
+        return message.chat_id in correcciones_pendientes
+
+esperando_correccion_filter = _EsperandoCorreccionFilter()
+
+
+async def recibir_correccion(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    chat_id = update.effective_chat.id
+    corr = correcciones_pendientes.pop(chat_id, None)
+    if not corr:
+        return ConversationHandler.END
+
+    pedido_id = corr["pedido_id"]
+    tipo      = corr["tipo"]
+    texto     = update.message.text.strip()
+
+    if tipo == "direccion":
+        nota        = f"Nueva dirección del cliente: {texto}"
+        msg_usuario = "✅ *Nueva dirección recibida.*\nLa revisaremos y confirmaremos el pedido lo antes posible. ¡Gracias!"
+        msg_admin   = f"📍 *Nueva dirección* — Pedido #{pedido_id}:\n\n{texto}"
+    elif tipo == "referencia":
+        nota        = f"Nueva referencia de pago: {texto}"
+        msg_usuario = "✅ *Nueva referencia recibida.*\nLa verificaremos y confirmaremos el pedido lo antes posible. ¡Gracias!"
+        msg_admin   = f"💳 *Nueva referencia de pago* — Pedido #{pedido_id}:\n\n`{texto}`"
+    else:
+        nota        = f"Mensaje del cliente: {texto}"
+        msg_usuario = "✅ *Mensaje recibido.*\nNos pondremos en contacto contigo lo antes posible. ¡Gracias!"
+        msg_admin   = f"💬 *Mensaje del cliente* — Pedido #{pedido_id}:\n\n{texto}"
+
+    try:
+        db.actualizar_estado_pedido(pedido_id, "pendiente_pago", nota)
+    except Exception:
+        pass
+
+    await update.message.reply_text(msg_usuario, parse_mode=ParseMode.MARKDOWN, reply_markup=MENU_KEYBOARD)
+
+    if ADMIN_CHAT_ID:
+        try:
+            teclado = InlineKeyboardMarkup([[
+                InlineKeyboardButton("✅ Confirmar pago",  callback_data=f"admin_confirmar_{pedido_id}"),
+                InlineKeyboardButton("❌ Rechazar pedido", callback_data=f"admin_rechazar_{pedido_id}"),
+            ]])
+            await context.bot.send_message(
+                chat_id=ADMIN_CHAT_ID, text=msg_admin,
+                parse_mode=ParseMode.MARKDOWN, reply_markup=teclado,
+            )
+        except TelegramError:
+            pass
+
+    return ConversationHandler.END
 
 
 def _parsear_pedido_web(texto: str) -> tuple[list[dict], float]:
@@ -1158,16 +1212,15 @@ async def admin_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         pedido = db.get_pedido(pedido_id)
         if not pedido:
             return
-        db.actualizar_estado_pedido(pedido_id, "pendiente_pago", "Admin: dirección incorrecta, pendiente corrección")
+        correcciones_pendientes[pedido["usuario_tg"]] = {"tipo": "direccion", "pedido_id": pedido_id}
+        db.actualizar_estado_pedido(pedido_id, "pendiente_pago", "Admin: dirección incorrecta, esperando corrección")
         await query.edit_message_text(
-            query.message.text + "\n\n📍 *Notificado: dirección incorrecta*",
+            query.message.text + "\n\n📍 *Notificado: dirección incorrecta — esperando respuesta del cliente*",
             parse_mode=ParseMode.MARKDOWN,
-            reply_markup=InlineKeyboardMarkup([
-                [
-                    InlineKeyboardButton("✅ Confirmar pago",   callback_data=f"admin_confirmar_{pedido_id}"),
-                    InlineKeyboardButton("❌ Rechazar pedido",  callback_data=f"admin_rechazar_{pedido_id}"),
-                ],
-            ]),
+            reply_markup=InlineKeyboardMarkup([[
+                InlineKeyboardButton("✅ Confirmar pago",  callback_data=f"admin_confirmar_{pedido_id}"),
+                InlineKeyboardButton("❌ Rechazar pedido", callback_data=f"admin_rechazar_{pedido_id}"),
+            ]]),
         )
         try:
             await context.bot.send_message(
@@ -1175,7 +1228,7 @@ async def admin_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 text=(
                     f"📍 *Pedido #{pedido_id} — Dirección incorrecta*\n\n"
                     f"La dirección de envío que nos proporcionaste parece incorrecta o incompleta.\n\n"
-                    f"Por favor, escríbenos tu dirección completa en formato:\n"
+                    f"Por favor, escríbenos aquí tu dirección completa en formato:\n"
                     f"_Nombre Apellidos, Calle y número, Código postal, Ciudad_"
                 ),
                 parse_mode=ParseMode.MARKDOWN,
@@ -1188,16 +1241,15 @@ async def admin_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         pedido = db.get_pedido(pedido_id)
         if not pedido:
             return
-        db.actualizar_estado_pedido(pedido_id, "pendiente_pago", "Admin: referencia de pago incorrecta, pendiente corrección")
+        correcciones_pendientes[pedido["usuario_tg"]] = {"tipo": "referencia", "pedido_id": pedido_id}
+        db.actualizar_estado_pedido(pedido_id, "pendiente_pago", "Admin: referencia de pago incorrecta, esperando corrección")
         await query.edit_message_text(
-            query.message.text + "\n\n💳 *Notificado: referencia de pago incorrecta*",
+            query.message.text + "\n\n💳 *Notificado: referencia incorrecta — esperando respuesta del cliente*",
             parse_mode=ParseMode.MARKDOWN,
-            reply_markup=InlineKeyboardMarkup([
-                [
-                    InlineKeyboardButton("✅ Confirmar pago",   callback_data=f"admin_confirmar_{pedido_id}"),
-                    InlineKeyboardButton("❌ Rechazar pedido",  callback_data=f"admin_rechazar_{pedido_id}"),
-                ],
-            ]),
+            reply_markup=InlineKeyboardMarkup([[
+                InlineKeyboardButton("✅ Confirmar pago",  callback_data=f"admin_confirmar_{pedido_id}"),
+                InlineKeyboardButton("❌ Rechazar pedido", callback_data=f"admin_rechazar_{pedido_id}"),
+            ]]),
         )
         try:
             await context.bot.send_message(
@@ -1205,7 +1257,7 @@ async def admin_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 text=(
                     f"💳 *Pedido #{pedido_id} — Referencia de pago no encontrada*\n\n"
                     f"No hemos podido localizar tu pago con la referencia que enviaste.\n\n"
-                    f"Por favor, comprueba el ID o comprobante de pago y escríbenos la referencia correcta."
+                    f"Por favor, escríbenos aquí el ID o comprobante de pago correcto."
                 ),
                 parse_mode=ParseMode.MARKDOWN,
             )
@@ -1217,16 +1269,15 @@ async def admin_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         pedido = db.get_pedido(pedido_id)
         if not pedido:
             return
-        db.actualizar_estado_pedido(pedido_id, "pendiente_pago", "Admin: problema pendiente de resolución")
+        correcciones_pendientes[pedido["usuario_tg"]] = {"tipo": "otro", "pedido_id": pedido_id}
+        db.actualizar_estado_pedido(pedido_id, "pendiente_pago", "Admin: problema pendiente, esperando respuesta del cliente")
         await query.edit_message_text(
-            query.message.text + "\n\n⚠️ *Notificado: hay un problema con el pedido*",
+            query.message.text + "\n\n⚠️ *Notificado: problema con el pedido — esperando respuesta del cliente*",
             parse_mode=ParseMode.MARKDOWN,
-            reply_markup=InlineKeyboardMarkup([
-                [
-                    InlineKeyboardButton("✅ Confirmar pago",   callback_data=f"admin_confirmar_{pedido_id}"),
-                    InlineKeyboardButton("❌ Rechazar pedido",  callback_data=f"admin_rechazar_{pedido_id}"),
-                ],
-            ]),
+            reply_markup=InlineKeyboardMarkup([[
+                InlineKeyboardButton("✅ Confirmar pago",  callback_data=f"admin_confirmar_{pedido_id}"),
+                InlineKeyboardButton("❌ Rechazar pedido", callback_data=f"admin_rechazar_{pedido_id}"),
+            ]]),
         )
         try:
             await context.bot.send_message(
@@ -1234,7 +1285,7 @@ async def admin_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 text=(
                     f"⚠️ *Pedido #{pedido_id} — Necesitamos tu ayuda*\n\n"
                     f"Hay un problema con tu pedido que necesitamos resolver antes de procesarlo.\n\n"
-                    f"Por favor, contáctanos respondiendo a este mensaje para que podamos ayudarte."
+                    f"Por favor, escríbenos aquí lo que necesites y te responderemos lo antes posible."
                 ),
                 parse_mode=ParseMode.MARKDOWN,
             )
@@ -1490,6 +1541,7 @@ def main():
         entry_points=[
             CommandHandler("start", cmd_start),
             MessageHandler(filters.Regex(r'🛒.*Pedido desde la tienda'), recibir_pedido_web),
+            MessageHandler(esperando_correccion_filter & filters.TEXT & ~filters.COMMAND, recibir_correccion),
         ],
         states={
             ESPERANDO_PRODUCTO_ID: [
