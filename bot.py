@@ -167,6 +167,7 @@ def _parsear_pedido_web(texto: str) -> tuple[list[dict], float]:
         nombre_dorsal = ''
         numero_dorsal = ''
         precio_item = 18.0
+        parches_item = []
 
         for line in lines[1:]:
             limpia = line.strip().lstrip('•').strip()
@@ -184,9 +185,8 @@ def _parsear_pedido_web(texto: str) -> tuple[list[dict], float]:
                 except ValueError:
                     pass
             elif limpia.startswith('Parches:'):
-                pers = 'solo_parches'
-                if nombre_dorsal:
-                    pers = 'nombre_numero_parches'
+                parches_item = [p.strip() for p in limpia[8:].split(',') if p.strip()]
+                pers = 'nombre_numero_parches' if nombre_dorsal else 'solo_parches'
             elif 'nombre' in limpia.lower() and 'número' in limpia.lower() and 'parches' in limpia.lower():
                 pers = 'nombre_numero_parches'
             elif 'nombre' in limpia.lower() and 'número' in limpia.lower():
@@ -209,6 +209,7 @@ def _parsear_pedido_web(texto: str) -> tuple[list[dict], float]:
             'tipo_personalizacion': pers,
             'nombre_dorsal':      nombre_dorsal,
             'numero_dorsal':      numero_dorsal,
+            'parches':            parches_item,
             'cantidad':           1,
             'precio_unitario':    precio_item,
         })
@@ -1016,8 +1017,13 @@ async def _notificar_admin(context, pedido_id, user, nombre_cliente, direccion, 
     for it in items:
         pers = ""
         if it.get("personalizado"):
-            parches = " + parches" if it.get("tipo_personalizacion") == "nombre_numero_parches" else ""
-            pers = f" ✏️ {it['nombre_dorsal']} #{it['numero_dorsal']}{parches}"
+            tipo = it.get("tipo_personalizacion", "")
+            parches_list = it.get("parches") or []
+            parches_str = (" 🏷 " + ", ".join(parches_list)) if parches_list else (" + parches" if "parches" in tipo else "")
+            if tipo in ("nombre_numero", "nombre_numero_parches"):
+                pers = f" ✏️ {it['nombre_dorsal']} #{it['numero_dorsal']}{parches_str}"
+            else:
+                pers = f"{parches_str}"
         yupoo = ""
         pid = it.get("producto_id")
         if pid:
