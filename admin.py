@@ -425,12 +425,61 @@ def _product_form(p=None, action_url="", submit_label="Guardar", with_photos=Tru
         photos_section = """
         <div class="form-group">
           <label>Fotos (puedes subir varias)</label>
-          <input type="file" name="fotos" multiple accept="image/*"
+          <input type="file" name="fotos" id="fotos-input" multiple accept="image/*"
                  style="width:100%;padding:8px;border:1px solid #cbd5e0;border-radius:6px;background:#fff">
-          <p style="color:#718096;font-size:.8rem;margin-top:4px">
-            La primera foto subida sera la portada.
+          <input type="hidden" name="portada_index" id="portada-index" value="0">
+          <p style="color:#718096;font-size:.8rem;margin-top:6px">
+            Haz clic en una foto para elegirla como portada.
           </p>
-        </div>"""
+          <div id="foto-previews" style="display:flex;flex-wrap:wrap;gap:12px;margin-top:14px"></div>
+        </div>
+        <style>
+          .preview-item {
+            position:relative; width:140px; cursor:pointer; border-radius:8px;
+            border:2px solid #e2e8f0; overflow:hidden; transition:border-color .15s;
+          }
+          .preview-item img { width:100%; height:110px; object-fit:cover; display:block; }
+          .preview-item .preview-label {
+            position:absolute; bottom:0; left:0; right:0;
+            background:rgba(0,0,0,.5); color:white; font-size:.7rem;
+            font-weight:700; text-align:center; padding:3px 0; opacity:0;
+            transition:opacity .15s;
+          }
+          .preview-item.selected { border-color:#5b9bd5; }
+          .preview-item.selected .preview-label { opacity:1; background:#5b9bd5; }
+          .preview-item:hover .preview-label { opacity:1; }
+        </style>
+        <script>
+          document.getElementById('fotos-input').addEventListener('change', function() {
+            var container = document.getElementById('foto-previews');
+            container.innerHTML = '';
+            var files = this.files;
+            for (var i = 0; i < files.length; i++) {
+              (function(idx) {
+                var item = document.createElement('div');
+                item.className = 'preview-item' + (idx === 0 ? ' selected' : '');
+                item.dataset.idx = idx;
+                var img = document.createElement('img');
+                var reader = new FileReader();
+                reader.onload = function(e) { img.src = e.target.result; };
+                reader.readAsDataURL(files[idx]);
+                var label = document.createElement('div');
+                label.className = 'preview-label';
+                label.textContent = 'PORTADA';
+                item.appendChild(img);
+                item.appendChild(label);
+                item.addEventListener('click', function() {
+                  document.querySelectorAll('.preview-item').forEach(function(el) {
+                    el.classList.remove('selected');
+                  });
+                  this.classList.add('selected');
+                  document.getElementById('portada-index').value = this.dataset.idx;
+                });
+                container.appendChild(item);
+              })(i);
+            }
+          });
+        </script>"""
 
     return f"""
     <form method="post" action="{action_url}" enctype="multipart/form-data">
@@ -523,13 +572,13 @@ def producto_nuevo():
 
         # Handle photo uploads
         fotos = request.files.getlist("fotos")
-        first = True
-        for f in fotos:
-            if f and f.filename:
-                datos = f.read()
-                if datos:
-                    db.guardar_foto(producto_id, datos, f.filename, es_portada=first)
-                    first = False
+        portada_index = int(request.form.get("portada_index", 0))
+        valid = [(i, f) for i, f in enumerate(fotos) if f and f.filename]
+        for pos, (i, f) in enumerate(valid):
+            datos = f.read()
+            if datos:
+                db.guardar_foto(producto_id, datos, f.filename,
+                                es_portada=(i == portada_index))
 
         flash(f"Producto '{data['nombre']}' creado.", "success")
         return redirect(url_for("productos_list"))
