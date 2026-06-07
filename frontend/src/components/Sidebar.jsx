@@ -1,16 +1,31 @@
 import React, { useState, useEffect } from 'react';
 
-const LEAGUE_ICONS = {
-  'La Liga': '🇪🇸',
-  'Premier League': '🏴󠁧󠁢󠁥󠁮󠁧󠁿',
-  'Bundesliga': '🇩🇪',
-  'Serie A': '🇮🇹',
-  'Ligue 1': '🇫🇷',
-  'Selecciones': '🌍',
+const LEAGUE_LOGOS = {
+  'La Liga':        '/logos/laliga.svg',
+  'Premier League': '/logos/premier-league.svg',
+  'Bundesliga':     '/logos/bundesliga.svg',
+  'Serie A':        '/logos/serie-a.svg',
+  'Ligue 1':        '/logos/ligue-1.svg',
+  'Selecciones':    '/logos/selecciones.svg',
+  'Mundial 2026':   '/logos/mundial.svg',
 };
 
-function getIcon(liga) {
-  return LEAGUE_ICONS[liga] || '⚽';
+const LEAGUE_EMOJI_FALLBACK = {
+  'La Liga': '🇪🇸', 'Premier League': '🏴󠁧󠁢󠁥󠁮󠁧󠁿', 'Bundesliga': '🇩🇪',
+  'Serie A': '🇮🇹', 'Ligue 1': '🇫🇷', 'Selecciones': '🌍', 'Mundial 2026': '🏆',
+};
+
+function LeagueIcon({ liga }) {
+  const src = LEAGUE_LOGOS[liga];
+  if (src) {
+    return (
+      <span className="league-icon">
+        <img src={src} alt={liga} onError={e => { e.target.style.display='none'; e.target.nextSibling.style.display='inline'; }} />
+        <span style={{display:'none'}}>{LEAGUE_EMOJI_FALLBACK[liga] || '⚽'}</span>
+      </span>
+    );
+  }
+  return <span className="league-icon">{LEAGUE_EMOJI_FALLBACK[liga] || '⚽'}</span>;
 }
 
 export default function Sidebar({ leagueTree, filter, onSelect, isOpen }) {
@@ -64,7 +79,7 @@ export default function Sidebar({ leagueTree, filter, onSelect, isOpen }) {
               className={`league-header${hasActiveChild ? ' has-active' : ''}`}
               onClick={() => toggleLeague(liga)}
             >
-              <span className="league-icon">{getIcon(liga)}</span>
+              <LeagueIcon liga={liga} />
               <span
                 className="league-name"
                 onClick={(e) => {

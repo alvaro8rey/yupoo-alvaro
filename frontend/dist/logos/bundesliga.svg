@@ -1,0 +1,13 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100">
+  <rect width="100" height="100" rx="16" fill="#D3010C"/>
+  <!-- Franjas bandera alemana -->
+  <rect x="0" y="0" width="100" height="33" rx="0" fill="#1A1A1A"/>
+  <rect x="0" y="33" width="100" height="34" fill="#D3010C"/>
+  <rect x="0" y="67" width="100" height="33" rx="0" fill="#FFCE00"/>
+  <!-- Fondo redondo encima -->
+  <circle cx="50" cy="50" r="36" fill="#D3010C" opacity="0.85"/>
+  <!-- Letra B estilizada -->
+  <text x="50" y="62" font-family="Arial Black,sans-serif" font-size="44" font-weight="900" fill="white" text-anchor="middle">B</text>
+  <!-- Borde -->
+  <rect width="100" height="100" rx="16" fill="none" stroke="white" stroke-width="3" opacity="0.2"/>
+</svg>

@@ -1,0 +1,19 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100">
+  <rect width="100" height="100" rx="16" fill="#37003C"/>
+  <!-- Corona -->
+  <polygon points="28,48 36,36 44,44 50,32 56,44 64,36 72,48 68,52 32,52" fill="#00FF85"/>
+  <!-- Cuerpo del leon -->
+  <ellipse cx="50" cy="68" rx="20" ry="18" fill="#00FF85"/>
+  <!-- Cabeza del leon -->
+  <circle cx="50" cy="52" r="14" fill="#00FF85"/>
+  <!-- Melena -->
+  <circle cx="50" cy="50" r="18" fill="#00D672" opacity="0.4"/>
+  <!-- Ojos -->
+  <circle cx="45" cy="50" r="3" fill="#37003C"/>
+  <circle cx="55" cy="50" r="3" fill="#37003C"/>
+  <!-- Nariz -->
+  <ellipse cx="50" cy="56" rx="3" ry="2.5" fill="#37003C" opacity="0.6"/>
+  <!-- Patas -->
+  <rect x="36" y="80" width="10" height="14" rx="5" fill="#00FF85"/>
+  <rect x="54" y="80" width="10" height="14" rx="5" fill="#00FF85"/>
+</svg>
