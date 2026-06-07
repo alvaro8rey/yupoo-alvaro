@@ -50,6 +50,7 @@ def init_db():
 
         c.execute("ALTER TABLE productos ADD COLUMN IF NOT EXISTS liga TEXT NOT NULL DEFAULT ''")
         c.execute("ALTER TABLE productos ADD COLUMN IF NOT EXISTS equipo TEXT NOT NULL DEFAULT ''")
+        c.execute("ALTER TABLE productos ADD COLUMN IF NOT EXISTS parches TEXT NOT NULL DEFAULT '[]'")
 
         c.execute("""
             CREATE TABLE IF NOT EXISTS pedidos (

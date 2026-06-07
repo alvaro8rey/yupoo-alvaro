@@ -28,8 +28,14 @@ app.secret_key = os.environ.get("FLASK_SECRET_KEY", "cambiar-en-produccion-xk92j
 
 ADMIN_PASSWORD = os.environ.get("ADMIN_PASSWORD", "admin123")
 
-LIGAS = ["La Liga", "Premier League", "Bundesliga", "Serie A", "Ligue 1", "Selecciones"]
+LIGAS = ["La Liga", "Premier League", "Bundesliga", "Serie A", "Ligue 1", "Selecciones", "Mundial 2026"]
 TALLAS_DISPONIBLES = ["S", "M", "L", "XL", "XXL", "XXXL"]
+PARCHES_DISPONIBLES = [
+    "La Liga", "Premier League", "Bundesliga", "Serie A", "Ligue 1",
+    "Champions League", "Europa League", "Conference League",
+    "Mundial 2026", "Copa América", "Eurocopa",
+    "Copa del Rey", "FA Cup",
+]
 
 # ── CSS base ─────────────────────────────────────────────────────────────────
 
@@ -412,6 +418,7 @@ def _product_form(p=None, action_url="", submit_label="Guardar", with_photos=Tru
     yupoo_url = p.get("yupoo_url", "")
     activo_checked = "checked" if p.get("activo", 1) else ""
     tallas_sel = json.loads(p.get("tallas") or "[]")
+    parches_sel = json.loads(p.get("parches") or "[]")
 
     ligas_opts = "".join(f'<option value="{l}">{l}</option>' for l in LIGAS)
 
@@ -419,6 +426,11 @@ def _product_form(p=None, action_url="", submit_label="Guardar", with_photos=Tru
     for t in TALLAS_DISPONIBLES:
         chk = "checked" if t in tallas_sel else ""
         tallas_checks += f'<label><input type="checkbox" name="tallas" value="{t}" {chk}> {t}</label>'
+
+    parches_checks = ""
+    for par in PARCHES_DISPONIBLES:
+        chk = "checked" if par in parches_sel else ""
+        parches_checks += f'<label><input type="checkbox" name="parches" value="{par}" {chk}> {par}</label>'
 
     photos_section = ""
     if with_photos:
@@ -513,6 +525,11 @@ def _product_form(p=None, action_url="", submit_label="Guardar", with_photos=Tru
           <label>Tallas disponibles</label>
           <div class="checkboxes">{tallas_checks}</div>
         </div>
+        <div class="form-group">
+          <label>Parches disponibles para esta camiseta</label>
+          <p style="color:#718096;font-size:.8rem;margin-bottom:8px">Selecciona los parches que el cliente podrá elegir al personalizar</p>
+          <div class="checkboxes">{parches_checks}</div>
+        </div>
         {photos_section}
         <div class="form-group">
           <label style="display:flex;align-items:center;gap:8px;font-weight:400;cursor:pointer">
@@ -529,15 +546,17 @@ def _product_form(p=None, action_url="", submit_label="Guardar", with_photos=Tru
 
 
 def _parse_product_form(form):
-    tallas = form.getlist("tallas")
+    tallas  = form.getlist("tallas")
+    parches = form.getlist("parches")
     return {
-        "nombre": form.get("nombre", "").strip(),
-        "precio": float(form.get("precio") or 18),
-        "liga": form.get("liga", "").strip(),
-        "equipo": form.get("equipo", "").strip(),
+        "nombre":    form.get("nombre", "").strip(),
+        "precio":    float(form.get("precio") or 18),
+        "liga":      form.get("liga", "").strip(),
+        "equipo":    form.get("equipo", "").strip(),
         "yupoo_url": form.get("yupoo_url", "").strip(),
-        "tallas": json.dumps(tallas),
-        "activo": 1 if form.get("activo") else 0,
+        "tallas":    json.dumps(tallas),
+        "parches":   json.dumps(parches),
+        "activo":    1 if form.get("activo") else 0,
     }
 
 
@@ -560,10 +579,10 @@ def producto_nuevo():
         try:
             c = conn.cursor()
             c.execute(
-                "INSERT INTO productos (nombre, precio, liga, equipo, yupoo_url, tallas, activo) "
-                "VALUES (%s, %s, %s, %s, %s, %s, %s) RETURNING id",
+                "INSERT INTO productos (nombre, precio, liga, equipo, yupoo_url, tallas, parches, activo) "
+                "VALUES (%s, %s, %s, %s, %s, %s, %s, %s) RETURNING id",
                 (data["nombre"], data["precio"], data["liga"], data["equipo"],
-                 data["yupoo_url"], data["tallas"], data["activo"])
+                 data["yupoo_url"], data["tallas"], data["parches"], data["activo"])
             )
             producto_id = c.fetchone()["id"]
             conn.commit()
@@ -607,9 +626,9 @@ def producto_editar(producto_id: int):
                 c = conn.cursor()
                 c.execute(
                     "UPDATE productos SET nombre=%s, precio=%s, liga=%s, equipo=%s, "
-                    "yupoo_url=%s, tallas=%s, activo=%s WHERE id=%s",
+                    "yupoo_url=%s, tallas=%s, parches=%s, activo=%s WHERE id=%s",
                     (data["nombre"], data["precio"], data["liga"], data["equipo"],
-                     data["yupoo_url"], data["tallas"], data["activo"], producto_id)
+                     data["yupoo_url"], data["tallas"], data["parches"], data["activo"], producto_id)
                 )
                 conn.commit()
             finally:
@@ -752,7 +771,8 @@ def api_productos():
     for p in productos:
         fotos = db.get_fotos_producto(p["id"])
         p_out = dict(p)
-        p_out["tallas"] = json.loads(p.get("tallas") or "[]")
+        p_out["tallas"]  = json.loads(p.get("tallas")  or "[]")
+        p_out["parches"] = json.loads(p.get("parches") or "[]")
         # Portada primero, luego el resto — URLs directas para el frontend
         fotos_ordenadas = sorted(fotos, key=lambda f: (0 if f["es_portada"] else 1))
         p_out["fotos"] = [f"{base}/foto/{f['id']}" for f in fotos_ordenadas]

@@ -12,28 +12,17 @@ const PERS_OPTIONS = [
   { key: 'nombre_numero_parches', label: 'Nombre + número + parches', sub: 'Dorsal + parches',                   precio: () => PRECIO_PARCHES_COMPLETO },
 ];
 
-const PATCHES_BY_LIGA = {
-  'La Liga':        ['La Liga', 'Champions League', 'Europa League', 'Conference League'],
-  'Premier League': ['Premier League', 'Champions League', 'Europa League', 'Conference League'],
-  'Bundesliga':     ['Bundesliga', 'Champions League', 'Europa League'],
-  'Serie A':        ['Serie A', 'Champions League', 'Europa League', 'Conference League'],
-  'Ligue 1':        ['Ligue 1', 'Champions League', 'Europa League'],
-  'Selecciones':    ['Mundial 2026', 'Copa América', 'Eurocopa'],
-  'Mundial 2026':   ['Mundial 2026'],
-};
 const DEFAULT_PATCHES = ['Champions League', 'Europa League', 'Conference League'];
-
-function getPatchOptions(liga) {
-  return PATCHES_BY_LIGA[liga] || DEFAULT_PATCHES;
-}
 
 const needsDorsal  = (p) => p === 'nombre_numero' || p === 'nombre_numero_parches';
 const needsParches = (p) => p === 'solo_parches'  || p === 'nombre_numero_parches';
 
 export default function ProductDetail({ product, onClose, onAddToCart }) {
   const fotos  = product.fotos?.length ? product.fotos : (product.foto_path ? [product.foto_path] : []);
-  const tallas = Array.isArray(product.tallas) ? product.tallas : [];
-  const patchOptions = getPatchOptions(product.liga);
+  const tallas       = Array.isArray(product.tallas)  ? product.tallas  : [];
+  const patchOptions = (Array.isArray(product.parches) && product.parches.length)
+    ? product.parches
+    : DEFAULT_PATCHES;
 
   const [activeIdx,    setActiveIdx]    = useState(0);
   const [imgError,     setImgError]     = useState({});
