@@ -856,16 +856,46 @@ async def recibir_referencia_pago(update: Update, context: ContextTypes.DEFAULT_
 
     limpiar_carrito(chat_id)
 
-    await update.message.reply_text(
+    confirmacion = (
         f"🎉 *¡Pedido #{pedido_id} recibido!*\n\n"
         f"📋 Resumen:\n"
         f"• Total: *{total:.2f} €*\n"
         f"• Referencia de pago: `{ref}`\n"
         f"• Estado: ⏳ Pendiente de verificación\n\n"
         f"Verificaremos el pago y te avisaremos enseguida.\n"
-        f"Puedes seguir el estado en *📦 Mis pedidos*. ¡Gracias! 🙏",
-        parse_mode=ParseMode.MARKDOWN,
+        f"Puedes seguir el estado en *📦 Mis pedidos*. ¡Gracias! 🙏"
     )
+
+    # Recopilar fotos de portada de los productos del pedido
+    fotos = []
+    for item in items:
+        pid = item.get("producto_id")
+        if pid:
+            try:
+                portada = db.get_portada(pid)
+                if portada:
+                    datos = db.get_foto_datos(portada["id"])
+                    if datos:
+                        fotos.append(datos)
+            except Exception:
+                pass
+
+    try:
+        if len(fotos) == 1:
+            await context.bot.send_photo(
+                chat_id=chat_id, photo=fotos[0],
+                caption=confirmacion, parse_mode=ParseMode.MARKDOWN,
+            )
+        elif len(fotos) > 1:
+            from telegram import InputMediaPhoto
+            media = [InputMediaPhoto(media=f) for f in fotos]
+            media[0] = InputMediaPhoto(media=fotos[0], caption=confirmacion, parse_mode=ParseMode.MARKDOWN)
+            await context.bot.send_media_group(chat_id=chat_id, media=media)
+        else:
+            await update.message.reply_text(confirmacion, parse_mode=ParseMode.MARKDOWN)
+    except TelegramError as e:
+        logger.warning("No se pudo enviar foto de confirmación: %s", e)
+        await update.message.reply_text(confirmacion, parse_mode=ParseMode.MARKDOWN)
 
     await _notificar_admin(context, pedido_id, user, nombre_cliente, direccion, total, items, ref)
     return ConversationHandler.END
