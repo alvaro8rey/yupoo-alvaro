@@ -1071,10 +1071,19 @@ async def _notificar_admin(context, pedido_id, user, nombre_cliente, direccion, 
         f"💳 *Ref pago:* `{ref}`\n\n"
         f"⚠️ Verifica el pago antes de confirmar."
     )
-    teclado = InlineKeyboardMarkup([[
-        InlineKeyboardButton("✅ Confirmar pago", callback_data=f"admin_confirmar_{pedido_id}"),
-        InlineKeyboardButton("❌ Rechazar", callback_data=f"admin_rechazar_{pedido_id}"),
-    ]])
+    teclado = InlineKeyboardMarkup([
+        [
+            InlineKeyboardButton("✅ Confirmar pago",    callback_data=f"admin_confirmar_{pedido_id}"),
+            InlineKeyboardButton("❌ Rechazar pedido",   callback_data=f"admin_rechazar_{pedido_id}"),
+        ],
+        [
+            InlineKeyboardButton("📍 Dirección incorrecta",  callback_data=f"admin_dir_{pedido_id}"),
+            InlineKeyboardButton("💳 Ref. pago incorrecta",  callback_data=f"admin_ref_{pedido_id}"),
+        ],
+        [
+            InlineKeyboardButton("⚠️ Otro problema",    callback_data=f"admin_problema_{pedido_id}"),
+        ],
+    ])
     try:
         await context.bot.send_message(
             chat_id=ADMIN_CHAT_ID, text=texto,
@@ -1138,6 +1147,94 @@ async def admin_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 text=(
                     f"❌ *No pudimos verificar tu pago para el pedido #{pedido_id}.*\n\n"
                     f"Revisa la referencia enviada o contáctanos."
+                ),
+                parse_mode=ParseMode.MARKDOWN,
+            )
+        except TelegramError:
+            pass
+
+    elif data.startswith("admin_dir_"):
+        pedido_id = int(data.split("_")[-1])
+        pedido = db.get_pedido(pedido_id)
+        if not pedido:
+            return
+        db.actualizar_estado_pedido(pedido_id, "pendiente_pago", "Admin: dirección incorrecta, pendiente corrección")
+        await query.edit_message_text(
+            query.message.text + "\n\n📍 *Notificado: dirección incorrecta*",
+            parse_mode=ParseMode.MARKDOWN,
+            reply_markup=InlineKeyboardMarkup([
+                [
+                    InlineKeyboardButton("✅ Confirmar pago",   callback_data=f"admin_confirmar_{pedido_id}"),
+                    InlineKeyboardButton("❌ Rechazar pedido",  callback_data=f"admin_rechazar_{pedido_id}"),
+                ],
+            ]),
+        )
+        try:
+            await context.bot.send_message(
+                chat_id=pedido["usuario_tg"],
+                text=(
+                    f"📍 *Pedido #{pedido_id} — Dirección incorrecta*\n\n"
+                    f"La dirección de envío que nos proporcionaste parece incorrecta o incompleta.\n\n"
+                    f"Por favor, escríbenos tu dirección completa en formato:\n"
+                    f"_Nombre Apellidos, Calle y número, Código postal, Ciudad_"
+                ),
+                parse_mode=ParseMode.MARKDOWN,
+            )
+        except TelegramError:
+            pass
+
+    elif data.startswith("admin_ref_"):
+        pedido_id = int(data.split("_")[-1])
+        pedido = db.get_pedido(pedido_id)
+        if not pedido:
+            return
+        db.actualizar_estado_pedido(pedido_id, "pendiente_pago", "Admin: referencia de pago incorrecta, pendiente corrección")
+        await query.edit_message_text(
+            query.message.text + "\n\n💳 *Notificado: referencia de pago incorrecta*",
+            parse_mode=ParseMode.MARKDOWN,
+            reply_markup=InlineKeyboardMarkup([
+                [
+                    InlineKeyboardButton("✅ Confirmar pago",   callback_data=f"admin_confirmar_{pedido_id}"),
+                    InlineKeyboardButton("❌ Rechazar pedido",  callback_data=f"admin_rechazar_{pedido_id}"),
+                ],
+            ]),
+        )
+        try:
+            await context.bot.send_message(
+                chat_id=pedido["usuario_tg"],
+                text=(
+                    f"💳 *Pedido #{pedido_id} — Referencia de pago no encontrada*\n\n"
+                    f"No hemos podido localizar tu pago con la referencia que enviaste.\n\n"
+                    f"Por favor, comprueba el ID o comprobante de pago y escríbenos la referencia correcta."
+                ),
+                parse_mode=ParseMode.MARKDOWN,
+            )
+        except TelegramError:
+            pass
+
+    elif data.startswith("admin_problema_"):
+        pedido_id = int(data.split("_")[-1])
+        pedido = db.get_pedido(pedido_id)
+        if not pedido:
+            return
+        db.actualizar_estado_pedido(pedido_id, "pendiente_pago", "Admin: problema pendiente de resolución")
+        await query.edit_message_text(
+            query.message.text + "\n\n⚠️ *Notificado: hay un problema con el pedido*",
+            parse_mode=ParseMode.MARKDOWN,
+            reply_markup=InlineKeyboardMarkup([
+                [
+                    InlineKeyboardButton("✅ Confirmar pago",   callback_data=f"admin_confirmar_{pedido_id}"),
+                    InlineKeyboardButton("❌ Rechazar pedido",  callback_data=f"admin_rechazar_{pedido_id}"),
+                ],
+            ]),
+        )
+        try:
+            await context.bot.send_message(
+                chat_id=pedido["usuario_tg"],
+                text=(
+                    f"⚠️ *Pedido #{pedido_id} — Necesitamos tu ayuda*\n\n"
+                    f"Hay un problema con tu pedido que necesitamos resolver antes de procesarlo.\n\n"
+                    f"Por favor, contáctanos respondiendo a este mensaje para que podamos ayudarte."
                 ),
                 parse_mode=ParseMode.MARKDOWN,
             )
