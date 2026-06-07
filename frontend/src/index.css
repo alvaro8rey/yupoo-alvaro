@@ -391,8 +391,8 @@ img {
 /* ── Product Grid ─────────────────────────────────────────────────────────── */
 .product-grid {
   display: grid;
-  grid-template-columns: repeat(4, 1fr);
-  gap: 1rem;
+  grid-template-columns: repeat(5, 1fr);
+  gap: .65rem;
 }
 
 /* ── Product Card ─────────────────────────────────────────────────────────── */
@@ -461,15 +461,15 @@ img {
 }
 
 .card-body {
-  padding: .75rem .875rem .875rem;
+  padding: .5rem .65rem .65rem;
   display: flex;
   flex-direction: column;
-  gap: .25rem;
+  gap: .18rem;
   flex: 1;
 }
 
 .card-equipo {
-  font-size: .7rem;
+  font-size: .62rem;
   font-weight: 600;
   letter-spacing: .05em;
   text-transform: uppercase;
@@ -477,10 +477,10 @@ img {
 }
 
 .card-name {
-  font-size: .875rem;
+  font-size: .78rem;
   font-weight: 600;
   color: var(--text);
-  line-height: 1.4;
+  line-height: 1.35;
   flex: 1;
   display: -webkit-box;
   -webkit-line-clamp: 2;
@@ -489,13 +489,13 @@ img {
 }
 
 .card-price {
-  font-size: 1.1rem;
+  font-size: .95rem;
   font-weight: 800;
   color: var(--blue-dark);
-  margin-top: .35rem;
+  margin-top: .25rem;
 }
 .card-price span {
-  font-size: .75rem;
+  font-size: .68rem;
   font-weight: 400;
   color: var(--text-muted);
   margin-left: .15rem;
@@ -1030,6 +1030,12 @@ img {
 }
 
 /* ── Mobile ───────────────────────────────────────────────────────────────── */
+@media (max-width: 1300px) {
+  .product-grid {
+    grid-template-columns: repeat(4, 1fr);
+  }
+}
+
 @media (max-width: 1100px) {
   .product-grid {
     grid-template-columns: repeat(3, 1fr);
